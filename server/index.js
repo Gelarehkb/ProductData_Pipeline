@@ -241,4 +241,7 @@ if (isProd) {
   app.get('*', (_req, res) => res.sendFile(join(__dirname, '../dist/index.html')));
 }
 
-app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+  console.log('OPENAI_API_KEY configured:', !!process.env.OPENAI_API_KEY);
+});
