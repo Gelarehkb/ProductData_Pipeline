@@ -130,7 +130,7 @@ Example output element: {"name": "Table Nori Stainless", "color": "red"}`;
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'gpt-4.1-mini', messages: [{ role: 'user', content: prompt }], temperature: 0.2 }),
+      body: JSON.stringify({ model: 'gpt-4.1-nano', messages: [{ role: 'user', content: prompt }], temperature: 0.2 }),
     });
 
     if (!response.ok) {
@@ -194,7 +194,7 @@ Output: [{"de":"Jacke Geo3/5 hazel brown","en":"Jacket Geo3/5 hazel brown"},{"de
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'gpt-4.1-mini', messages: [{ role: 'user', content: prompt }], temperature: 0.2 }),
+      body: JSON.stringify({ model: 'gpt-4.1-nano', messages: [{ role: 'user', content: prompt }], temperature: 0.2 }),
     });
 
     if (!response.ok) {
