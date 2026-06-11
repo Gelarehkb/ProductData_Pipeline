@@ -230,6 +230,8 @@ Output: [{"de":"Jacke Geo3/5 hazel brown","en":"Jacket Geo3/5 hazel brown"},{"de
 });
 
 
+app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+
 app.use('/api/generate-online-texts-simple', generateSimple);
 app.use('/api/generate-online-texts-complex', generateComplex);
 
