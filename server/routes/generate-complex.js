@@ -54,13 +54,13 @@ HTML STRUCTURE
 <hr style="border:none;border-top:1px solid #e0e0e0;margin:10px 0;">
 <details><summary><strong>Lieferumfang</strong></summary><p class="bottom25">...</p></details>
 
-Only add sections that make sense for the product. Keep sections short and do not repeat the same fact in multiple sections.
-If the product is complex enough, add an FAQ at the end with real parent questions.
+Füge nur Abschnitte hinzu, die für das Produkt sinnvoll sind. Halte die Abschnitte kurz und wiederhole dieselbe Information nicht in mehreren Abschnitten.
+Wenn das Produkt komplex genug ist, füge am Ende ein FAQ mit echten Elternfragen hinzu.
 
-FAQ FORMAT
+FAQ-FORMAT
 <hr style="border:none;border-top:1px solid #e0e0e0;margin:10px 0;"><h2><strong>H&auml;ufige Fragen</strong></h2><details><summary><strong>[Echte Elternfrage]</strong></summary><p class="bottom25">[2–3 Sätze, direkt, keine Marketingsprache.]</p></details>
 
-Keep the HTML output visually consistent with this structure.
+Halte die HTML-Ausgabe visuell konsistent mit dieser Struktur.
 
 CONTENT RULES
 
@@ -76,7 +76,6 @@ const generateForItem = async (item, apiKey) => {
       model: 'o4-mini',
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
-      temperature: 0.7,
     }),
   });
   if (!response.ok) {
