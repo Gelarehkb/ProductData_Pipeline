@@ -170,31 +170,28 @@ app.post('/api/translate-article-names', async (req, res) => {
       throw new Error('articleNames array is required');
     }
 
-    const prompt = `You are a translator for a children's product store.
+    const prompt = `You are a product name translator for a children's store in Austria.
 
-Each input is a product name WITHOUT color — color is never included. For each name, provide:
-1. "de" — German version. If already German, return as-is. If English product type word found, translate ONLY that word (e.g. "Jacket" → "Jacke", "Trousers" → "Hose", "Dress" → "Kleid"). Keep brand names, model names, and all other words unchanged.
-2. "en" — English version. Translate ONLY the German product type word (e.g. "Jacke" → "Jacket"). Keep everything else unchanged. Return "" if no meaningful translation exists.
+Your ONLY job: identify the English word(s) that describe WHAT THE OBJECT IS (the product type), translate them to German, and leave everything else exactly as-is.
 
-Rules:
-- Translate ONLY the product type word (what the item IS). Nothing else.
-- Keep brand names and model identifiers exactly as-is.
-- German words "mit", "zum", "aus" must be lowercase.
-- Never return "NAN" or "nan" — use "" instead.
+TRANSLATE only the product-type word(s):
+jacket→Jacke, trousers/pants→Hose, t-shirt→T-Shirt, shirt→Shirt, dress→Kleid, shoes→Schuhe, boots→Stiefel, sneakers→Sneaker, coat→Mantel, vest→Weste, sweater→Pullover, cardigan→Cardigan, overall→Overall, bodysuit→Body, leggings→Leggings, shorts→Shorts, skirt→Rock, tights→Strumpfhose, socks→Socken, hat→Mütze, cap→Cap, scarf→Schal, gloves→Handschuhe, bag→Tasche, backpack→Rucksack, sleeping bag→Schlafsack, blanket→Decke, stroller→Kinderwagen, carrier→Tragehilfe, toy→Spielzeug, pacifier→Schnuller, table→Tisch, chair→Stuhl, shelf→Regal, crib→Gitterbett, mattress→Matratze, pillow→Kissen, blanket→Decke, swimsuit→Badeanzug, swim shorts→Badehose
 
-Article names:
-${articleNames.map((name, i) => `${i + 1}. "${name}"`).join('\n')}
+LEAVE UNCHANGED (copy character-for-character):
+- Everything else: brand names, model names, version codes, numbers, patterns (e.g. "Geo3/5", "SS24", "Pro"), colors (e.g. navy, hazel, forest, sage, camel, stone, sand), adjectives, descriptors
 
-Respond ONLY with a JSON array, no markdown: [{"de":"...","en":"..."},...]
+If the name is already German, return it unchanged.
 
-Example:
-Input: ["Jacket Geo3/5", "Stroller Organizer"]
-Output: [{"de":"Jacke Geo3/5","en":"Jacket Geo3/5"},{"de":"Stroller Organizer","en":"Stroller Organizer"}]`;
+Product names:
+${articleNames.map((name, i) => `${i + 1}. ${name}`).join('\n')}
+
+Respond ONLY with a JSON array of strings, same order, no markdown:
+["result1","result2",...]`;
 
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'gpt-4.1-nano', messages: [{ role: 'user', content: prompt }], temperature: 0.2 }),
+      body: JSON.stringify({ model: 'gpt-4.1-mini', messages: [{ role: 'user', content: prompt }], response_format: { type: 'json_object' }, temperature: 0.1 }),
     });
 
     if (!response.ok) {
@@ -208,18 +205,19 @@ Output: [{"de":"Jacke Geo3/5","en":"Jacket Geo3/5"},{"de":"Stroller Organizer","
     let content = data.choices?.[0]?.message?.content || '';
     content = content.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
 
-    let translations;
+    let names;
     try {
       const parsed = JSON.parse(content);
-      translations = Array.isArray(parsed) ? parsed : (parsed.translations || parsed.results);
-      if (!Array.isArray(translations)) throw new Error('Not an array');
+      names = Array.isArray(parsed)
+        ? parsed
+        : (parsed.translations || parsed.names || parsed.results || Object.values(parsed));
+      if (!Array.isArray(names)) throw new Error('Not an array');
     } catch {
       throw new Error('AI returned invalid JSON');
     }
 
-    translations = translations.map(t => ({
-      de: t.de && t.de.toLowerCase() !== 'nan' ? t.de : '',
-      en: t.en && t.en.toLowerCase() !== 'nan' ? t.en : '',
+    const translations = names.map((n, i) => ({
+      de: typeof n === 'string' && n.toLowerCase() !== 'nan' ? n : articleNames[i],
     }));
 
     res.json({ translations });

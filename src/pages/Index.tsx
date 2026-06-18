@@ -667,9 +667,10 @@ const Index = () => {
       const uniqueNames = [...new Set(filledRows.map(r => getClothName(r).trim()))];
       const { data, error } = await apiFetch('translate-article-names', { articleNames: uniqueNames });
       if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+      const d = data as any;
+      if (d?.error) throw new Error(d.error);
 
-      const translations: { de: string }[] = data?.translations;
+      const translations: { de: string }[] = d?.translations;
       if (!Array.isArray(translations)) throw new Error("Invalid response");
 
       const nameMap: Record<string, string> = {};
