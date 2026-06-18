@@ -2004,13 +2004,24 @@ const Index = () => {
                               </>
                             )}
                             {col.key === "ItemName" && (
-                              <Switch
-                                checked={restructureName}
-                                onCheckedChange={(v) => { setRestructureName(v); if (!v) processedNamesRef.current = {}; }}
-                                onClick={(e) => e.stopPropagation()}
-                                title={lang === "DE" ? "KI: Name umstrukturieren & Farbe extrahieren" : "AI: Restructure name & extract color"}
-                                className="scale-75"
-                              />
+                              <>
+                                <Switch
+                                  checked={restructureName}
+                                  onCheckedChange={(v) => { setRestructureName(v); if (!v) processedNamesRef.current = {}; }}
+                                  onClick={(e) => e.stopPropagation()}
+                                  title={lang === "DE" ? "KI: Name umstrukturieren & Farbe extrahieren" : "AI: Restructure name & extract color"}
+                                  className="scale-75"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); handleTranslateNames(); }}
+                                  className="px-1.5 py-0.5 text-[10px] rounded bg-primary text-primary-foreground hover:bg-primary/90"
+                                  title={lang === "DE" ? "Namen ins Deutsche übersetzen" : "Translate names to German"}
+                                  disabled={isTranslating}
+                                >
+                                  {isTranslating ? "..." : "De"}
+                                </button>
+                              </>
                             )}
                           </span>
                         )}
@@ -2286,15 +2297,6 @@ const Index = () => {
           >
             {isClassifying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
             {isClassifying ? t("aiClassifying", lang) : t("aiClassify", lang)}
-          </Button>
-          <Button
-            onClick={handleTranslateNames}
-            variant="outline"
-            className="gap-2"
-            disabled={isTranslating}
-          >
-            {isTranslating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-            {isTranslating ? (lang === "DE" ? "Übersetze..." : "Translating...") : (lang === "DE" ? "Namen übersetzen" : "Translate Names")}
           </Button>
         </div>
       </div>
