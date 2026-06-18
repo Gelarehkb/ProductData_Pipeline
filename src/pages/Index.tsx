@@ -11,6 +11,7 @@ import { MerkmaleMultiSelect } from "@/components/MerkmaleMultiSelect";
 import { useToast } from "@/hooks/use-toast";
 import { FindReplaceDialog } from "@/components/FindReplaceDialog";
 import { ImportDialog, type ImportTargetField } from "@/components/ImportDialog";
+import { TextPreviewModal, type TextPreviewRow } from "@/components/TextPreviewModal";
 async function apiFetch(fn: string, body: object): Promise<{ data: unknown; error: Error | null }> {
   try {
     const res = await fetch(`/api/${fn}`, {
@@ -503,6 +504,9 @@ const Index = () => {
   const processedNamesRef = useRef<Record<string, string>>({});
   const [isGeneratingTexts, setIsGeneratingTexts] = useState(false);
   const [textGenerating, setTextGenerating] = useState(false);
+  const [textPreviewOpen, setTextPreviewOpen] = useState(false);
+  const [textPreviewRows, setTextPreviewRows] = useState<TextPreviewRow[]>([]);
+  const [confirmedTexts, setConfirmedTexts] = useState<Record<string, { produkttext: string; Title_Tag: string; html_de: string; meta_description: string; suchbegriffe: string }>>({});
   const [importDialogOpen, setImportDialogOpen] = useState(false);
 
   const handleImportRows = useCallback((imported: Partial<Record<ImportTargetField, string>>[]) => {
@@ -1557,7 +1561,152 @@ const Index = () => {
     });
   };
 
-  const processAndDownload = async () => {
+  const handleGenerateTexts = async () => {
+    const filledRows = rows.filter(r => getClothName(r).trim() !== "");
+    if (filledRows.length === 0) {
+      toast({ title: t("noData", lang), description: t("noDataDesc", lang), variant: "destructive" });
+      return;
+    }
+
+    // Compute max VK per product name (Rule 1: skip if VK < 19)
+    const vkByName: Record<string, number> = {};
+    rows.forEach(r => {
+      const n = getClothName(r);
+      if (!n) return;
+      const raw = String(r.VK ?? "").replace(",", ".").replace(/[^\d.\-]/g, "");
+      const vk = parseFloat(raw);
+      if (!isNaN(vk)) {
+        if (!(n in vkByName) || vk > vkByName[n]) vkByName[n] = vk;
+      } else if (!(n in vkByName)) {
+        vkByName[n] = 0;
+      }
+    });
+
+    const seen = new Set<string>();
+    const allItems: { artikelname: string; han: string; markenname: string; beschreibung: string; warengruppe: string; art: string; _name: string }[] = [];
+    rows.forEach(r => {
+      const _name = getClothName(r);
+      if (!_name || seen.has(_name)) return;
+      seen.add(_name);
+      allItems.push({
+        artikelname: _name,
+        han: safe(r.HAN),
+        markenname: hersteller.trim(),
+        beschreibung: safe(r.Description),
+        warengruppe: safe(r.WarenGruppe),
+        art: safe(r.MerkmaleArt),
+        _name,
+      });
+    });
+
+    const priceSkipped: string[] = [];
+    const priceEligible = allItems.filter(it => {
+      const ok = (vkByName[it._name] ?? 0) >= 19;
+      if (!ok) priceSkipped.push(it._name);
+      return ok;
+    });
+
+    const descMap = new Map<string, typeof priceEligible[number]>();
+    const toGenerate: typeof priceEligible = [];
+    const reuseFrom: Record<string, string> = {};
+    priceEligible.forEach(it => {
+      const key = (it.beschreibung || "").trim().toLowerCase();
+      if (key && descMap.has(key)) {
+        reuseFrom[it._name] = descMap.get(key)!._name;
+      } else {
+        if (key) descMap.set(key, it);
+        toGenerate.push(it);
+      }
+    });
+
+    const callsMade = toGenerate.length;
+    const reuseCount = Object.keys(reuseFrom).length;
+    const priceSkippedCount = priceSkipped.length;
+    const generatedMap: Record<string, { produkttext: string; Title_Tag: string; html_de: string; meta_description: string; suchbegriffe: string }> = {};
+
+    setIsGeneratingTexts(true);
+    try {
+      if (toGenerate.length > 0) {
+        const COMPLEX_WG = new Set(["KiWa", "Möbel"]);
+        const isComplex = (it: typeof toGenerate[number]) =>
+          COMPLEX_WG.has((it.warengruppe || "").trim()) || /Autositz/i.test(it.art || "");
+        const complexItems = toGenerate.filter(isComplex);
+        const simpleItems = toGenerate.filter(it => !isComplex(it));
+
+        const invokeBatch = async (fn: string, batch: typeof toGenerate) => {
+          if (batch.length === 0) return;
+          const { data, error } = await apiFetch(fn, { items: batch.map(({ _name, ...rest }) => rest) });
+          if (error) throw error;
+          const results = (data as any)?.results;
+          if (Array.isArray(results)) {
+            batch.forEach((it, i) => {
+              const res = results[i];
+              if (res && !("error" in res)) {
+                generatedMap[it._name] = {
+                  produkttext: res.produkttext || "",
+                  Title_Tag: res.Title_Tag || "",
+                  html_de: res.html_de || "",
+                  meta_description: res.meta_description || "",
+                  suchbegriffe: res.suchbegriffe || "",
+                };
+              }
+            });
+            const failed = results.filter((r: any) => r && typeof r === "object" && "error" in r);
+            if (failed.length > 0) {
+              toast({
+                title: lang === "DE" ? "Teilweise fehlgeschlagen" : "Partially failed",
+                description: `${failed.length}/${results.length}: ${(failed[0] as any).error}`,
+                variant: "destructive",
+              });
+            }
+          }
+        };
+
+        await Promise.all([
+          invokeBatch("generate-online-texts-simple", simpleItems),
+          invokeBatch("generate-online-texts-complex", complexItems),
+        ]);
+      }
+
+      Object.entries(reuseFrom).forEach(([dst, src]) => {
+        const srcTx = generatedMap[src];
+        if (!srcTx) return;
+        const swap = (s: string) => (s && src ? s.split(src).join(dst) : s);
+        generatedMap[dst] = {
+          produkttext: swap(srcTx.produkttext),
+          Title_Tag: swap(srcTx.Title_Tag),
+          html_de: swap(srcTx.html_de),
+          meta_description: swap(srcTx.meta_description),
+          suchbegriffe: swap(srcTx.suchbegriffe),
+        };
+      });
+
+      toast({
+        title: lang === "DE" ? "KI-Aufrufe" : "AI calls",
+        description: lang === "DE"
+          ? `${callsMade} generiert · ${reuseCount} wiederverwendet · ${priceSkippedCount} übersprungen (VK<19)`
+          : `${callsMade} generated · ${reuseCount} reused · ${priceSkippedCount} skipped (VK<19)`,
+      });
+
+      // Build preview rows from all eligible items (using confirmed texts as base, overwriting with newly generated)
+      const previewMap = { ...confirmedTexts, ...generatedMap };
+      const empty = { produkttext: "", Title_Tag: "", html_de: "", meta_description: "", suchbegriffe: "" };
+      const preview: TextPreviewRow[] = allItems.map(it => ({
+        id: it._name,
+        name: it._name,
+        ...(previewMap[it._name] || empty),
+      }));
+      setTextPreviewRows(preview);
+      setTextPreviewOpen(true);
+    } catch (err) {
+      console.error("generate-online-texts failed:", err);
+      toast({ title: lang === "DE" ? "Textgenerierung fehlgeschlagen" : "Text generation failed", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+    } finally {
+      setIsGeneratingTexts(false);
+    }
+  };
+
+  const processAndDownload = async (textsOverride?: typeof confirmedTexts) => {
     const AufAB = parseInt(ab) || 1;
     const AufAuf = parseInt(auf) || 2;
     const AufSe = aufSe;
@@ -1572,143 +1721,7 @@ const Index = () => {
       groups[key].push(row);
     });
 
-    // === AI text generation (optional) ===
-    const textsByName: Record<string, { produkttext: string; Title_Tag: string; html_de: string; meta_description: string; suchbegriffe: string }> = {};
-    if (textGenerating) {
-      // Compute max VK per product name (Rule 1: skip if VK < 19)
-      const vkByName: Record<string, number> = {};
-      rows.forEach(r => {
-        const n = getClothName(r);
-        if (!n) return;
-        const raw = String(r.VK ?? "").replace(",", ".").replace(/[^\d.\-]/g, "");
-        const vk = parseFloat(raw);
-        if (!isNaN(vk)) {
-          if (!(n in vkByName) || vk > vkByName[n]) vkByName[n] = vk;
-        } else if (!(n in vkByName)) {
-          vkByName[n] = 0;
-        }
-      });
-
-      const seen = new Set<string>();
-      const allItems: { artikelname: string; han: string; markenname: string; beschreibung: string; warengruppe: string; art: string; _name: string }[] = [];
-      rows.forEach(r => {
-        const _name = getClothName(r);
-        if (!_name || seen.has(_name)) return;
-        seen.add(_name);
-        allItems.push({
-          artikelname: _name,
-          han: safe(r.HAN),
-          markenname: hersteller.trim(),
-          beschreibung: safe(r.Description),
-          warengruppe: safe(r.WarenGruppe),
-          art: safe(r.MerkmaleArt),
-          _name,
-        });
-      });
-
-      // Rule 1: filter out items with VK < 19
-      const priceSkipped: string[] = [];
-      const priceEligible = allItems.filter(it => {
-        const ok = (vkByName[it._name] ?? 0) >= 19;
-        if (!ok) priceSkipped.push(it._name);
-        return ok;
-      });
-
-      // Rule 2: dedupe by identical source description (reuse output, swap name)
-      const descMap = new Map<string, typeof priceEligible[number]>();
-      const toGenerate: typeof priceEligible = [];
-      const reuseFrom: Record<string, string> = {}; // dst _name -> src _name
-      priceEligible.forEach(it => {
-        const key = (it.beschreibung || "").trim().toLowerCase();
-        if (key && descMap.has(key)) {
-          reuseFrom[it._name] = descMap.get(key)!._name;
-        } else {
-          if (key) descMap.set(key, it);
-          toGenerate.push(it);
-        }
-      });
-
-      const callsMade = toGenerate.length;
-      const reuseCount = Object.keys(reuseFrom).length;
-      const priceSkippedCount = priceSkipped.length;
-
-      if (toGenerate.length > 0) {
-        setIsGeneratingTexts(true);
-        try {
-          const COMPLEX_WG = new Set(["KiWa", "Möbel"]);
-          const isComplex = (it: typeof toGenerate[number]) =>
-            COMPLEX_WG.has((it.warengruppe || "").trim()) || /Autositz/i.test(it.art || "");
-
-          const complexItems = toGenerate.filter(isComplex);
-          const simpleItems = toGenerate.filter(it => !isComplex(it));
-
-          const invokeBatch = async (fn: string, batch: typeof toGenerate) => {
-            if (batch.length === 0) return;
-            const { data, error } = await apiFetch(fn, {
-              items: batch.map(({ _name, ...rest }) => rest),
-            });
-            if (error) throw error;
-            const results = data?.results;
-            if (Array.isArray(results)) {
-              batch.forEach((it, i) => {
-                const res = results[i];
-                if (res && !("error" in res)) {
-                  textsByName[it._name] = {
-                    produkttext: res.produkttext || "",
-                    Title_Tag: res.Title_Tag || "",
-                    html_de: res.html_de || "",
-                    meta_description: res.meta_description || "",
-                    suchbegriffe: res.suchbegriffe || "",
-                  };
-                }
-              });
-              const failed = results.filter((r: any) => r && typeof r === "object" && "error" in r);
-              if (failed.length > 0) {
-                toast({
-                  title: lang === "DE" ? "Teilweise fehlgeschlagen" : "Partially failed",
-                  description: `[${fn}] ${failed.length}/${results.length}: ${(failed[0] as any).error}`,
-                  variant: "destructive",
-                });
-              }
-            }
-          };
-
-          await Promise.all([
-            invokeBatch("generate-online-texts-simple", simpleItems),
-            invokeBatch("generate-online-texts-complex", complexItems),
-          ]);
-        } catch (err) {
-          console.error("generate-online-texts failed:", err);
-          const msg = err instanceof Error ? err.message : String(err);
-          toast({ title: lang === "DE" ? "Textgenerierung fehlgeschlagen" : "Text generation failed", description: msg, variant: "destructive" });
-        } finally {
-          setIsGeneratingTexts(false);
-        }
-      }
-
-
-      // Rule 2 cont.: copy reused outputs, substituting the product name inline
-      Object.entries(reuseFrom).forEach(([dst, src]) => {
-        const srcTx = textsByName[src];
-        if (!srcTx) return;
-        const swap = (s: string) => (s && src ? s.split(src).join(dst) : s);
-        textsByName[dst] = {
-          produkttext: swap(srcTx.produkttext),
-          Title_Tag: swap(srcTx.Title_Tag),
-          html_de: swap(srcTx.html_de),
-          meta_description: swap(srcTx.meta_description),
-          suchbegriffe: swap(srcTx.suchbegriffe),
-        };
-      });
-
-      // Counter toast: calls made vs skipped due to reuse
-      toast({
-        title: lang === "DE" ? "KI-Aufrufe" : "AI calls",
-        description: lang === "DE"
-          ? `${callsMade} generiert · ${reuseCount} wiederverwendet · ${priceSkippedCount} übersprungen (VK<19)`
-          : `${callsMade} generated · ${reuseCount} reused · ${priceSkippedCount} skipped (VK<19)`,
-      });
-    }
+    const textsByName = textsOverride ?? confirmedTexts;
 
     const outputRows: Record<string, string | number>[] = [];
 
@@ -2284,6 +2297,12 @@ const Index = () => {
               {lang === "DE" ? "Text Generierung" : "Text Generating"}
             </Label>
           </div>
+          {textGenerating && (
+            <Button variant="outline" className="gap-2" onClick={handleGenerateTexts} disabled={isGeneratingTexts}>
+              {isGeneratingTexts ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              {isGeneratingTexts ? (lang === "DE" ? "Generiere..." : "Generating...") : (lang === "DE" ? "Generieren" : "Generate")}
+            </Button>
+          )}
           <Button onClick={processAndDownload} className="gap-2" disabled={isGeneratingTexts}>
             {isGeneratingTexts ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             {isGeneratingTexts ? (lang === "DE" ? "Generiere Texte..." : "Generating texts...") : t("csvExport", lang)}
@@ -2301,6 +2320,20 @@ const Index = () => {
         </div>
       </div>
       <ImportDialog open={importDialogOpen} onOpenChange={setImportDialogOpen} onImport={handleImportRows} lang={lang} />
+      <TextPreviewModal
+        open={textPreviewOpen}
+        onOpenChange={setTextPreviewOpen}
+        initialRows={textPreviewRows}
+        lang={lang}
+        onConfirm={(editedRows) => {
+          const map: Record<string, { produkttext: string; Title_Tag: string; html_de: string; meta_description: string; suchbegriffe: string }> = {};
+          editedRows.forEach(r => {
+            map[r.name] = { produkttext: r.produkttext, Title_Tag: r.Title_Tag, html_de: r.html_de, meta_description: r.meta_description, suchbegriffe: r.suchbegriffe };
+          });
+          setConfirmedTexts(map);
+          processAndDownload(map);
+        }}
+      />
     </div>
   );
 };
