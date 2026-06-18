@@ -7,64 +7,44 @@ const buildPrompt = (item) => {
   const C  = item.markenname    || '';
   const D  = item.beschreibung  || '';
   const W  = item.warengruppe   || '';
-  const ART         = item.art              || '';
   const SCHAURAUM   = item.im_schauraum     || '';
   const PREIS       = item.preisniveau      || '';
   const VARIANTEN   = item.varianten        || '';
   const USPS        = item.usps             || '';
   const AWARDS      = item.auszeichnungen   || '';
   const LIMITIERT   = item.limitiert        || '';
-  const isAutositz  = /Autositz/i.test(ART);
-  const schauraum_hint = SCHAURAUM.toLowerCase() === 'ja'
-    ? '\n- Im Schauraum: explizit erwähnen dass das Produkt in Wien getestet werden kann.'
-    : '';
 
-  return `Du bist Texter für herrundfrauklein.com (Baby/Kinderartikel, Wien). Antworte NUR mit JSON – kein Markdown.
+  return `Du bist Texter für herrundfrauklein.com. Antworte nur mit JSON, ohne Markdown.
 
 INPUT
 Markenname: "${C}"
 Artikelname: "${A}"
 Produktkategorie: "${W}"
-Art: "${ART}"
 Im Schauraum: "${SCHAURAUM}"
 Preisniveau: "${PREIS}"
 Varianten: "${VARIANTEN}"
 USPs: "${USPS}"
 Auszeichnungen: "${AWARDS}"
 Limitiert/Saison: "${LIMITIERT}"
-Referenzinformationen: "${D}"${isAutositz ? '\n⚠ Autositz: Normen (i-Size/ECE R129/R44), Gewichts-/Größenbereich, Isofix, Einbaurichtung, Lieferumfang recherchieren.' : ''}
+Referenzinformationen: "${D}"
 
-Fehlende Felder eigenständig recherchieren – keine Fakten erfinden.
-Quellenpriorität: 1) Herstellerwebsite  2) Referenzinformationen  3) weitere Quellen.
-Bei Widersprüchen: immer Herstellerangabe.
+Nutze nur belastbare Informationen. Erfinde nichts. Wenn etwas fehlt, recherchiere es über Herstellerangaben oder die Referenzinformationen; bei Widersprüchen zählt die Herstellerangabe.
+  Qualität vor Geschwindigkeit: nimm dir die nötige Zeit für eine saubere, vollständige und präzise Antwort.
 
 JSON-KEYS (alle Pflicht):
-"produkttext" | "html_de" | "meta_description" | "title_tag" | "suchbegriffe" | "farbe" | "produktart"
+"produkttext" | "html_de" | "meta_description" | "title_tag" | "suchbegriffe" | "farbe"
 
-════════════════════════════════════════
-AUFGABE 1 – html_de  (+ produkttext als Plaintext davon)
-════════════════════════════════════════
-Komplexität nach Erklärungsbedarf, NICHT nach Preis.
-Auch Premium-Produkte dürfen kurz sein wenn sofort verständlich.
+OUTPUT RULES
+"html_de": HTML mit fester Struktur: Titel, Einleitung, mehrere Details-Abschnitte, optional FAQ.
+"produkttext": derselbe Inhalt als Plaintext ohne HTML.
+"meta_description": 140–155 Zeichen, Hauptnutzen plus eine relevante Spezifikation plus ein kurzes Vertrauenssignal.
+"title_tag": 50–60 Zeichen, Marke oder Kategorie vorne, keine Maße oder Zertifikate.
+"suchbegriffe": bis 240 Zeichen, Marke zuerst, nur treffende Substantive.
+"farbe": die dominante Grundfarbe aus der ersten Wahrnehmung, exakt ein Wert.
 
-PRIORITÄT: Kauffakten → Verständlichkeit → Vertrauen → Scannbarkeit → SEO → Atmosphäre
-
-TONALITÄT
-- Warm, klar, geduzt (du/dein/euer), Marke 3. Person
-- Humor durch Präzision (treffender Elternalltag), nie Witze. Kein Humor bei Sicherheit/Fakten/Technik.
-- Keine leeren Superlative. Menschlich, nicht kataloghaft.
-- Text = Empfehlung von jemandem dem man vertraut.
-
-<strong>-REGELN
-- Nur für Kaufargumente: Alter, Material, Sicherheit, Vorteile, Technik
-- 1–2 Hervorhebungen pro Absatz. Nicht dekorativ. Produkttitel NICHT automatisch fetten.
-- Im ersten Absatz die Produktart/Hauptnutzen hervorheben: z.B. <strong>faltbarer Reise-Kindersitz</strong>
-
-LESBARKEIT: Mobile first. Max. 3 Sätze/Absatz. Listen > Fließtext. Kein H1.
-
-HTML-STRUKTUR (Pflicht):
+HTML STRUCTURE
 <h2><strong>[Produkttitel]</strong></h2>
-<p class="bottom25">[Einleitung: was, für wen, Hauptnutzen. Altersbereich/Nutzungsdauer hier nennen. Subtiler Humor erlaubt.]</p>
+<p class="bottom25">[Einleitung: was, für wen, Hauptnutzen. Altersbereich/Nutzungsdauer hier nennen.]</p>
 <hr style="border:none;border-top:1px solid #e0e0e0;margin:10px 0;">
 <details><summary><strong>[Starkes Produktargument als Titel]</strong></summary><p class="bottom25">...</p></details>
 <hr style="border:none;border-top:1px solid #e0e0e0;margin:10px 0;">
@@ -74,65 +54,17 @@ HTML-STRUKTUR (Pflicht):
 <hr style="border:none;border-top:1px solid #e0e0e0;margin:10px 0;">
 <details><summary><strong>Lieferumfang</strong></summary><p class="bottom25">...</p></details>
 
-SEKTIONEN: Nur sinnvolle. Max 3–4 Sätze oder knappe Liste. Kein Themen-Mix. Keine Dopplungen zwischen Sektionen.
-Sektionstitel: aus stärkstem Argument ableiten (z.B. "Warum dieses Bett länger bleibt"). Kein generischer Titel ohne Inhalt.
+Only add sections that make sense for the product. Keep sections short and do not repeat the same fact in multiple sections.
+If the product is complex enough, add an FAQ at the end with real parent questions.
 
-INHALT-REGELN
-- Altersangaben: exakt vom Hersteller, niemals schätzen/runden. Prominent im sichtbaren Haupttext.
-- Material: beschreiben, nicht nur nennen. Zertifikate (FSC/GOTS/EN71) kurz erklären.
-- Baby-Sicherheit: schadstoffgeprüft/BPA-frei/PVC-frei nur wenn belegbar.
-- Sozialer Beweis: Auszeichnungen aktiv recherchieren, prominent platzieren. Keine erfundenen Signale.
-- Limitiert: wenn ja – dezent auf Knappheit hinweisen, kein künstlicher Druck.
-- Zubehör: nur real/recherchierbar, kurz im Fließtext, kein eigener Abschnitt.
-- Technische Daten: Maße, Belastung, Altersbereich, Umbauvarianten, Kompatibilität.
-- Lieferumfang: Pflicht nach Recherche.
-- Abschluss: Kirchengasse 7, 1070 Wien erwähnen.${schauraum_hint}
-- FAQ optional: nur bei wirklich komplexen Produkten mit echten Elternfragen. Keine Dopplungen zum Haupttext.
-  Format: <hr style="border:none;border-top:1px solid #e0e0e0;margin:10px 0;"><h2><strong>H&auml;ufige Fragen</strong></h2><details><summary><strong>[Echte Elternfrage]</strong></summary><p class="bottom25">[2–3 Sätze, direkt, keine Marketingsprache.]</p></details>
+FAQ FORMAT
+<hr style="border:none;border-top:1px solid #e0e0e0;margin:10px 0;"><h2><strong>H&auml;ufige Fragen</strong></h2><details><summary><strong>[Echte Elternfrage]</strong></summary><p class="bottom25">[2–3 Sätze, direkt, keine Marketingsprache.]</p></details>
 
-Kauffakten (Alter, Belastung, Nutzungsdauer, Sicherheit) NIEMALS nur in FAQs.
-FORMATTING: kein head/body/div. <p class="bottom25"> und <ul class="bottom25">. Sonderzeichen als HTML-Entities. Eine Box.
+Keep the HTML output visually consistent with this structure.
 
-════════════════════════════════════════
-AUFGABE 2 – meta_description
-════════════════════════════════════════
-140–155 Zeichen. Struktur: Hauptnutzen + Spec/Maß + Vertrauenssignal + opt. CTA.
-Maße einmal, NIE im Title wiederholen. Echter Satz der einlädt, kein Feature-Listing.
-✓ "Das Wood Mini+ wächst von 70×140 bis 70×160 cm mit – FSC-Holz, umbaubar bis Schulalter. Im Schauraum Wien testen."
-✗ "Das Wood Mini+. Mitwächst. FSC. 70x160 cm. Umbaubar. Jetzt kaufen."
+CONTENT RULES
 
-════════════════════════════════════════
-AUFGABE 3 – title_tag
-════════════════════════════════════════
-50–60 Zeichen. HERR UND FRAU KLEIN in Großbuchstaben.
-- Kategorie/Nutzen vorne: wenn Marke schwächer oder Kategorie das stärkere Keyword
-- Marke vorne: wenn starkes Keyword (Cybex, Stokke, Bugaboo, Babybjörn, Maxi-Cosi…)
-- Keine Maße, keine Zertifikate, keine Materialangaben
-- Wien nur wenn kaufentscheidend (z.B. Kinderwagen, Möbel)
-- "| HERR UND FRAU KLEIN" weglassen wenn dadurch >60 Zeichen
-
-════════════════════════════════════════
-AUFGABE 5 – suchbegriffe
-════════════════════════════════════════
-Max. 240 Zeichen. Nur Substantive. Marke als erstes Wort. Rechtschreibvarianten + typische Tippfehler.
-Zahlen+Einheiten zusammen: "100cm". Keine Zertifikate/Maße/Nachhaltigkeit/Pflege/Ortsbegriffe.
-Einzeilig, leerzeichengetrennt. Keine Wortwiederholungen. Lieber weniger, dafür treffsicher.
-
-════════════════════════════════════════
-AUFGABE 6 – farbe
-════════════════════════════════════════
-Dominante Grundfarbe beim ersten Blick. Grundfarbe > Musterfarbe > Designname.
-Bei Holz: Holzton entscheidet (Natur/Eiche→beige, weiß lackiert→weiß, Walnuss→braun, grau gebeizt→grau).
-"mehrfarbig" nur wenn wirklich keine Grundfarbe dominiert.
-Erlaubte Werte – exakt einen zurückgeben:
-beige, blau, braun, gelb, grau, grün, mehrfarbig, orange, rosa, rot, schwarz, türkis, violett, weiß
-
-════════════════════════════════════════
-AUFGABE 7 – produktart
-════════════════════════════════════════
-Exakt einen Begriff aus dieser Liste zurückgeben (unverändert, keine Erklärung):
-Accessories, Aufbewahrung, Babywippe, Baden, Beleuchtung, Betten, Bewegung, Care, Decken, Deko, Einzelkinderwagen, Essen, Fahren, Geschwisterkinderwagen, Große Spielsachen, Hochstühle, Kinderautositze, Kinderwagen, Kinderwagen Einzelteil, Kommoden, Lernen, Matratzen, Nestchen, Regale, Schränke, Spielen, Stillen, Stühle, Teppich, Teppiche, Tische, Tragen, Trinken, Waschen, Wickeltaschen, Wickelunterlagen, Wiegen, Zubehör
-Bei unklarer Zuordnung: null`;
+  `;
 };
 
 const generateForItem = async (item, apiKey) => {
@@ -161,8 +93,6 @@ const generateForItem = async (item, apiKey) => {
     html_de:          parsed.html_de          || '',
     meta_description: parsed.meta_description || '',
     suchbegriffe:     parsed.suchbegriffe     || '',
-    farbe:            parsed.farbe            || '',
-    produktart:       parsed.produktart       || null,
   };
 };
 

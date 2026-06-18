@@ -15,41 +15,42 @@ app.use(express.json({ limit: '10mb' }));
 
 const PORT = process.env.PORT || process.env.API_PORT || 3001;
 
+// ── Static reference data ──────────────────────────────────────────────────────
+const WARENGRUPPE = ["Accessoires","Care","Deko","Dienstleistungen","Essen/Trinken","Fahren","Fahrräder","Gutscheine","Homeware","KiWa","KiWa Zubehör","Kleidung Basics","Kleidung Funktion","Kleidung Mode","Medien","Möbel","Schuhe","Spielzeug Baby","Spielzeug Kind","Spielzeug Kleinkind","Taschen","Tragen"];
+const FARBE = ["beige","blau","braun","gelb","grau","grün","mehrfärbig","orange","rosa","rot","schwarz","türkis","violett","weiß"];
+const ART = ["Accessories","Aufbewahrung","Babyspielsachen","Babywippe","Baden","Beißen","Beleuchtung","Betten","Bettwäsche","Bewegung","Bodies","Cardigans","Care","Decken","Deko","Einzelkinderwagen","Essen","Fahren","Fußsäcke","Geschwisterkinderwagen","Große Spielsachen","Gutscheine","Handschuhe","Hauben","Hochstühle","Holzspielzeug","Hosen","Hüte","Jacken","Autositze","Kinderwagen","Kinderwagen Einzelteil","Kissen","Kleider","Kniestrümpfe","Kommoden","Kurze Hosen","Kuscheltiere","Lätzchen","Leggings","Lernen","Matratzen","Modellbahn","Musik","Nestchen","Overalls","Pullover","Puppen","Pyjamas","Regale","Röcke","Schals","Schlafsäcke","Schnuller","Schränke","Schuhe","Schwimmbekleidung","Socken","Spiele","Spielen","Stillen","Stofftiere","Stoffwindeln","Strampler","Stühle","Sweatshirts","Taschen","Tattoos","Teppich","Teppiche","Tische","Tops","Tragen","Trinken","T-Shirts","Waschen","Wickeltaschen","Wickelunterlagen","Wiegen","Zubehör"];
+const GROESSE = ["50 cm (0M)","62 cm (0-3M)","68 cm (3-6M)","74 cm (6-9M)","80 cm (9-12M)","86 cm (12-18M)","92 cm (2J)","98 cm (3J)","104 cm (4J)","110 cm (5J)","116 cm (6J)","120 cm (6J)","128 cm (6J)"];
+
 // ── classify-products ──────────────────────────────────────────────────────────
 app.post('/api/classify-products', async (req, res) => {
   try {
     const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
     if (!OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is not configured');
 
-    const { items, warengruppeOptions, farbeOptions, artOptions, groesseOptions } = req.body;
+    const { items } = req.body;
     const sizes = req.body.sizes ? req.body.sizes.map(s => s ? s.toLowerCase().replace(/\s+/g, '') : '') : [];
     if (!items || !Array.isArray(items) || items.length === 0) throw new Error('items array is required');
 
     const prompt = `You are a product classifier for a children's clothing and accessories store.
 
-For each item name below, choose the BEST matching value from each of these lists. You MUST only use values from these exact lists.
+For each item, choose the BEST matching value from each list. Use ONLY values from these exact lists.
 
-**Warengruppe** (product group): ${JSON.stringify(warengruppeOptions)}
-**Farbe** (color): ${JSON.stringify(farbeOptions)}
-**Art** (type): ${JSON.stringify(artOptions)}
-**Größe** (size): ${JSON.stringify(groesseOptions)}
+Warengruppe: ${JSON.stringify(WARENGRUPPE)}
+Farbe: ${JSON.stringify(FARBE)}
+Art: ${JSON.stringify(ART)}
+Größe: ${JSON.stringify(GROESSE)}
 
 Rules:
-- Extract color from the item name if present (e.g. "pink" → "rosa", "blue" → "blau", "red" → "rot", "green" → "grün", "white" → "weiß", "black" → "schwarz", "grey/gray" → "grau", "brown" → "braun", "yellow" → "gelb", "orange" → "orange", "purple" → "violett", "turquoise" → "türkis", "beige" → "beige", "multicolor/bunt" → "mehrfärbig")
-- If no color is detectable, leave Farbe empty
-- If no size is detectable from the name, leave Größe empty
-- For Art, match the product type (e.g. "tshirt"/"t-shirt" → "T-Shirts", "jacket" → "Jacken", "pants/trousers" → "Hosen", "dress" → "Kleider", "shoes" → "Schuhe", "socks" → "Socken", "hat" → "Hüte", "body/bodysuit" → "Bodies", "overall" → "Overalls", "leggings" → "Leggings", "pullover/sweater" → "Pullover", "cardigan" → "Cardigans", "sweatshirt" → "Sweatshirts", "shorts" → "Kurze Hosen", "romper" → "Strampler", "pajama/pyjama" → "Pyjamas", "scarf" → "Schals", "gloves" → "Handschuhe", "bag" → "Taschen", "toy" → "Spielen", "blanket" → "Decken", "sleeping bag" → "Schlafsäcke")
-- For Warengruppe, classify into the broader category
+- Farbe: extract color from name (pink→rosa, blue→blau, red→rot, green→grün, white→weiß, black→schwarz, grey/gray→grau, brown→braun, yellow→gelb, purple→violett, turquoise→türkis, multicolor/bunt→mehrfärbig). Leave empty if no color found.
+- Größe: match size in brackets to closest cm value (e.g. 62→"62 cm (0-3M)", 86→"86 cm (12-18M)"). T1→"86 cm (12-18M)", T2→"92 cm (2J)". Leave empty if no size.
+- Art: match product type (t-shirt→T-Shirts, jacket→Jacken, pants→Hosen, dress→Kleider, shoes→Schuhe, socks→Socken, body/bodysuit→Bodies, overall→Overalls, leggings→Leggings, pullover/sweater→Pullover, cardigan→Cardigans, sweatshirt→Sweatshirts, shorts→Kurze Hosen, romper/strampler→Strampler, pajama→Pyjamas, scarf→Schals, gloves→Handschuhe, bag→Taschen, toy→Spielen, blanket→Decken, sleeping bag→Schlafsäcke).
+- Warengruppe: choose the broader product group.
 
-Items to classify (with their size values):
-${items.map((item, i) => `${i + 1}. ${item}${sizes && sizes[i] ? ` [Size: ${sizes[i]}]` : ''}`).join('\n')}
+Items:
+${items.map((item, i) => `${i + 1}. ${item}${sizes[i] ? ` [Size: ${sizes[i]}]` : ''}`).join('\n')}
 
-IMPORTANT for Größe: When a size value is provided in brackets, match it to the closest option from the Größe list. For example: "62" → "62 cm (0-3 M)", "86" → "86 cm (12-18 M)", "98" → "98 cm (3 J)". Match by the numeric cm value.
-
-Respond ONLY with a JSON object (no markdown, no code fences) with exactly one key: "classifications". The value must be an array where each element has exactly these keys: "warengruppe", "farbe", "art", "groesse". Use empty string "" when no match is found.
-
-Example response:
-{"classifications":[{"warengruppe":"Kleidung Basics","farbe":"rosa","art":"T-Shirts","groesse":""},{"warengruppe":"Schuhe","farbe":"blau","art":"Schuhe","groesse":""}]}`;
+Respond ONLY with JSON, no markdown: {"classifications":[{"warengruppe":"...","farbe":"...","art":"...","groesse":"..."},...]}
+Use "" when no match. One entry per item in order.`;
 
     const bodyPayload = JSON.stringify({
       model: 'gpt-4.1-mini',
@@ -169,27 +170,26 @@ app.post('/api/translate-article-names', async (req, res) => {
       throw new Error('articleNames array is required');
     }
 
-    const prompt = `You are a translator for a children's product store. You translate product names between German and English.
+    const prompt = `You are a translator for a children's product store.
 
-For each article name below, provide:
-1. "de" — the German version of the full article name. If the input is already German, return it as-is. If it contains English product type words, translate ONLY the product type word to German (e.g. "Jacket" → "Jacke", "Trousers" → "Hose") while keeping brand names, model names, and descriptive words unchanged.
-2. "en" — the English version of the full article name. Translate ONLY the German product type word to English (e.g. "Jacke" → "Jacket", "Hose" → "Trousers") while keeping brand names, model names, color names, and other descriptive words unchanged. If you cannot determine a meaningful English translation, return an empty string "".
+Each input is a product name WITHOUT color — color is never included. For each name, provide:
+1. "de" — German version. If already German, return as-is. If English product type word found, translate ONLY that word (e.g. "Jacket" → "Jacke", "Trousers" → "Hose", "Dress" → "Kleid"). Keep brand names, model names, and all other words unchanged.
+2. "en" — English version. Translate ONLY the German product type word (e.g. "Jacke" → "Jacket"). Keep everything else unchanged. Return "" if no meaningful translation exists.
 
-IMPORTANT RULES:
-- Only translate the product type word (the first word that describes what the item IS, e.g. Jacke, Hose, Kleid, Schuh, etc.)
-- Keep brand names, model identifiers, color names, size indicators EXACTLY as they are
-- German words "mit", "zum", "aus" must always be lowercase
-- If the name has no recognizable product type, return the original for "de" and empty string for "en"
-- Never return "NAN" or "nan" — use empty string "" instead
+Rules:
+- Translate ONLY the product type word (what the item IS). Nothing else.
+- Keep brand names and model identifiers exactly as-is.
+- German words "mit", "zum", "aus" must be lowercase.
+- Never return "NAN" or "nan" — use "" instead.
 
-Article names to translate:
+Article names:
 ${articleNames.map((name, i) => `${i + 1}. "${name}"`).join('\n')}
 
-Respond ONLY with a JSON array (no markdown, no code fences). Each element must have exactly these keys: "de", "en".
+Respond ONLY with a JSON array, no markdown: [{"de":"...","en":"..."},...]
 
 Example:
-Input: ["Jacke Geo3/5 hazel brown", "Stroller Organizer mint"]
-Output: [{"de":"Jacke Geo3/5 hazel brown","en":"Jacket Geo3/5 hazel brown"},{"de":"Stroller Organizer mint","en":"Stroller Organizer mint"}]`;
+Input: ["Jacket Geo3/5", "Stroller Organizer"]
+Output: [{"de":"Jacke Geo3/5","en":"Jacket Geo3/5"},{"de":"Stroller Organizer","en":"Stroller Organizer"}]`;
 
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',

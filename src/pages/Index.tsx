@@ -553,7 +553,7 @@ const Index = () => {
     "Beleuchtung", "Betten", "Bettwäsche", "Bewegung", "Bodies", "Cardigans", "Care",
     "Decken", "Deko", "Einzelkinderwagen", "Essen", "Fahren", "Fußsäcke",
     "Geschwisterkinderwagen", "Große Spielsachen", "Gutscheine", "Handschuhe", "Hauben",
-    "Hochstühle", "Holzspielzeug", "Hosen", "Hüte", "Jacken", "Autositz",
+    "Hochstühle", "Holzspielzeug", "Hosen", "Hüte", "Jacken", "Autositze",
     "Kinderwagen", "Kinderwagen Einzelteil", "Kissen", "Kleider", "Kniestrümpfe",
     "Kommoden", "Kurze Hosen", "Kuscheltiere", "Lätzchen", "Leggings", "Lernen",
     "Matratzen", "Modellbahn", "Musik", "Nestchen", "Overalls", "Pullover", "Puppen",
@@ -587,6 +587,7 @@ const Index = () => {
   const tableRef = useRef<HTMLTableElement>(null);
   const [findReplaceOpen, setFindReplaceOpen] = useState(false);
   const [isClassifying, setIsClassifying] = useState(false);
+  const [isTranslating, setIsTranslating] = useState(false);
 
   const handleAIClassify = async () => {
     const filledRows = rows.filter(r => getClothName(r).trim() !== "");
@@ -604,10 +605,6 @@ const Index = () => {
       const { data, error } = await apiFetch('classify-products', {
         items: itemNames,
         sizes: itemSizes,
-        warengruppeOptions: warengruppeOptions,
-        farbeOptions: merkmaleFarbeOptions,
-        artOptions: merkmaleArtOptions,
-        groesseOptions: merkmaleGroesseOptions,
       });
 
       if (error) throw error;
@@ -652,6 +649,42 @@ const Index = () => {
       toast({ title: t("classifyError", lang), description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
     } finally {
       setIsClassifying(false);
+    }
+  };
+
+  const handleTranslateNames = async () => {
+    const filledRows = rows.filter(r => getClothName(r).trim() !== "");
+    if (filledRows.length === 0) {
+      toast({ title: t("noData", lang), description: t("noDataDesc", lang), variant: "destructive" });
+      return;
+    }
+    setIsTranslating(true);
+    try {
+      const uniqueNames = [...new Set(filledRows.map(r => getClothName(r).trim()))];
+      const { data, error } = await apiFetch('translate-article-names', { articleNames: uniqueNames });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      const translations: { de: string }[] = data?.translations;
+      if (!Array.isArray(translations)) throw new Error("Invalid response");
+
+      const nameMap: Record<string, string> = {};
+      uniqueNames.forEach((name, i) => {
+        nameMap[name] = translations[i]?.de || name;
+      });
+
+      setHistory(prev => [...prev.slice(-19), rows]);
+      setRows(prev => prev.map(row => {
+        const original = getClothName(row).trim();
+        if (!original || !nameMap[original]) return row;
+        return { ...row, Collection: "", ItemName: nameMap[original], Measurement: "", InfoMaterial: "" };
+      }));
+      toast({ title: lang === "DE" ? "Namen übersetzt" : "Names translated", description: lang === "DE" ? `${uniqueNames.length} Namen übersetzt.` : `${uniqueNames.length} names translated.` });
+    } catch (err) {
+      console.error("Translation error:", err);
+      toast({ title: t("translationFailed", lang), description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
+    } finally {
+      setIsTranslating(false);
     }
   };
 
@@ -1539,51 +1572,6 @@ const Index = () => {
       groups[key].push(row);
     });
 
-    // Collect unique product names
-    const uniqueNames = [...new Set(
-      Object.keys(groups).map(key => key.split("|")[0]).filter(n => n.length > 0)
-    )];
-
-    // === AI-powered translation for article names ===
-    const translationMapDE: Record<string, string> = {};
-
-    if (uniqueNames.length > 0) {
-      try {
-        const { data, error } = await apiFetch('translate-article-names', { articleNames: uniqueNames });
-
-        if (error) throw error;
-
-        if (data?.error) {
-          if (data.error.includes("Rate limit")) {
-            toast({ title: t("rateLimit", lang), description: t("rateLimitDesc", lang), variant: "destructive" });
-          } else if (data.error.includes("Payment")) {
-            toast({ title: t("paymentIssue", lang), description: t("paymentIssueDesc", lang), variant: "destructive" });
-          } else {
-            throw new Error(data.error);
-          }
-          // Fallback: use original names
-          uniqueNames.forEach(name => {
-            translationMapDE[name] = name;
-          });
-        } else {
-          const translations = data?.translations;
-          if (Array.isArray(translations)) {
-            uniqueNames.forEach((name, i) => {
-              const tr = translations[i];
-              translationMapDE[name] = tr?.de || name;
-            });
-          }
-        }
-      } catch (err) {
-        console.error("Translation error:", err);
-        toast({ title: t("translationFailed", lang), description: t("translationFailedDesc", lang), variant: "destructive" });
-        // Fallback: use original names for DE
-        uniqueNames.forEach(name => {
-          translationMapDE[name] = name;
-        });
-      }
-    }
-
     // === AI text generation (optional) ===
     const textsByName: Record<string, { produkttext: string; Title_Tag: string; html_de: string; meta_description: string; suchbegriffe: string }> = {};
     if (textGenerating) {
@@ -1608,7 +1596,7 @@ const Index = () => {
         if (!_name || seen.has(_name)) return;
         seen.add(_name);
         allItems.push({
-          artikelname: translationMapDE[_name] || _name,
+          artikelname: _name,
           han: safe(r.HAN),
           markenname: hersteller.trim(),
           beschreibung: safe(r.Description),
@@ -1731,7 +1719,7 @@ const Index = () => {
       const sizes = [...new Set(groupRows.map(r => safe(r.Size)))];
       const hasParent = vaterstat && sizes.length > 1;
       // German translation is fetched ONCE per name and reused for Artikelname/Etikettenname
-      const translated = translationMapDE[name] || "";
+      const translated = name;
 
       // Aggregate merkmale across group for parent row (union of values)
       const unionMulti = (key: "MerkmaleGroesse" | "MerkmaleArt" | "MerkmaleFarbe") => {
@@ -2290,14 +2278,23 @@ const Index = () => {
             {isGeneratingTexts ? (lang === "DE" ? "Generiere Texte..." : "Generating texts...") : t("csvExport", lang)}
           </Button>
 
-          <Button 
-            onClick={handleAIClassify} 
-            variant="outline" 
+          <Button
+            onClick={handleAIClassify}
+            variant="outline"
             className="gap-2"
             disabled={isClassifying}
           >
             {isClassifying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
             {isClassifying ? t("aiClassifying", lang) : t("aiClassify", lang)}
+          </Button>
+          <Button
+            onClick={handleTranslateNames}
+            variant="outline"
+            className="gap-2"
+            disabled={isTranslating}
+          >
+            {isTranslating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+            {isTranslating ? (lang === "DE" ? "Übersetze..." : "Translating...") : (lang === "DE" ? "Namen übersetzen" : "Translate Names")}
           </Button>
         </div>
       </div>
