@@ -1195,6 +1195,9 @@ const Index = () => {
         matrix = parse(text, "\t");
       } else if (hasSemicolon) {
         matrix = parse(text, ";");
+      } else if (text.trimStart().startsWith('"')) {
+        // Quoted RFC4180 with no column delimiter — each "..." block is one row.
+        matrix = parse(text, "\x00");
       } else {
         matrix = text.split(/\r?\n/).filter(l => l.trim() !== "").map(l => [l]);
       }
@@ -1481,14 +1484,17 @@ const Index = () => {
       return out.filter(r => r.some(c => c.trim() !== ""));
     };
 
-    // Delimiter priority: tab (Excel) → semicolon (CSV) → newline-only (single column).
+    // Delimiter priority: tab (Excel) → semicolon (CSV) → quoted blocks → newline-only.
     let matrix: string[][];
     if (hasTab) {
       matrix = parse(pastedText, "\t");
     } else if (hasSemicolon) {
       matrix = parse(pastedText, ";");
+    } else if (pastedText.trimStart().startsWith('"')) {
+      // Quoted RFC4180 with no column delimiter — each "..." block is one row.
+      matrix = parse(pastedText, "\x00");
     } else {
-      // Newline-only: one value per row, one column.
+      // Plain newline-separated values: one value per row, one column.
       matrix = pastedText.split(/\r?\n/).filter(l => l.trim() !== "").map(l => [l]);
     }
 
