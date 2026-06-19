@@ -1148,48 +1148,81 @@ const Index = () => {
     
     try {
       const text = await navigator.clipboard.readText();
-      const lines = text.split(/\r?\n/).filter(l => l.length > 0);
-      
       const minRow = Math.min(...selection.map(s => s.row));
-      const maxRow = Math.max(...selection.map(s => s.row));
       const minCol = Math.min(...selection.map(s => s.col));
-      const maxCol = Math.max(...selection.map(s => s.col));
-      
-      const isSingleColumn = minCol === maxCol;
       const targetField = columns[minCol].key as keyof ClothRow;
-      const isFreeTextField = targetField === "Description" || targetField === "ItemName";
-      // For free-text fields selected as single column: always paste entire clipboard as one value.
-      const isSingleCellClipboard =
-        (isSingleColumn && isFreeTextField) ||
-        (lines.length === 1 && !text.includes("\t") && !text.includes(";"));
+
+      const hasTab       = text.includes("\t");
+      const hasSemicolon = text.includes(";");
+      const hasNewline   = /\r?\n/.test(text.trim());
+
+      // Description always gets the full text as one value.
+      if (targetField === "Description" && !hasTab && !hasSemicolon) {
+        setHistory(prev => [...prev.slice(-49), rows]);
+        setRows(prev => {
+          const newRows = [...prev];
+          newRows[minRow] = { ...newRows[minRow], [targetField]: text.trimEnd() };
+          return newRows;
+        });
+        toast({ title: "Eingefügt", description: "Daten wurden eingefügt." });
+        return;
+      }
+
+      // Parse with the right delimiter: tab → semicolon → newline-only.
+      const parse = (raw: string, delim: string): string[][] => {
+        const out: string[][] = [];
+        let row: string[] = [], cell = "", inQ = false;
+        for (let i = 0; i < raw.length; i++) {
+          const ch = raw[i];
+          if (inQ) {
+            if (ch === '"' && raw[i + 1] === '"') { cell += '"'; i++; }
+            else if (ch === '"') { inQ = false; }
+            else { cell += ch; }
+          } else {
+            if (ch === '"') { inQ = true; }
+            else if (ch === delim) { row.push(cell); cell = ""; }
+            else if (ch === "\n") { row.push(cell); out.push(row); row = []; cell = ""; }
+            else if (ch !== "\r") { cell += ch; }
+          }
+        }
+        row.push(cell);
+        if (!(row.length === 1 && row[0] === "")) out.push(row);
+        return out.filter(r => r.some(c => c.trim() !== ""));
+      };
+
+      let matrix: string[][];
+      if (hasTab) {
+        matrix = parse(text, "\t");
+      } else if (hasSemicolon) {
+        matrix = parse(text, ";");
+      } else {
+        matrix = text.split(/\r?\n/).filter(l => l.trim() !== "").map(l => [l]);
+      }
+
+      if (matrix.length === 0) return;
 
       setHistory(prev => [...prev.slice(-49), rows]);
-
-      if (isSingleCellClipboard) {
-        const field = targetField;
-        const value = field === "EK" || field === "VK" ? text.trim().replace(/\./g, ",") : text.trimEnd();
-        setRows(prev => {
-          const newRows = [...prev];
-          newRows[minRow] = { ...newRows[minRow], [field]: value };
-          return newRows;
-        });
-      } else {
-        setRows(prev => {
-          const newRows = [...prev];
-          lines.forEach((line, lineIdx) => {
-            const cells = isSingleColumn ? [line] : (line.includes("\t") ? line.split("\t") : line.split(";"));
-            cells.forEach((cell, cellIdx) => {
-              const targetRow = minRow + lineIdx;
-              const targetCol = minCol + cellIdx;
-              if (targetRow < newRows.length && targetCol < columns.length) {
-                const field = columns[targetCol].key;
-                newRows[targetRow] = { ...newRows[targetRow], [field]: cell.trim() };
-              }
-            });
+      lastEditedCellRef.current = null;
+      setRows(prev => {
+        const newRows = [...prev];
+        matrix.forEach((cells, i) => {
+          const targetRow = minRow + i;
+          while (targetRow >= newRows.length) newRows.push(createEmptyRow());
+          const updated = { ...newRows[targetRow] };
+          cells.forEach((val, j) => {
+            const targetCol = minCol + j;
+            if (targetCol < columns.length) {
+              const tf = columns[targetCol].key as keyof ClothRow;
+              let v = val.trim();
+              if (tf === "EK" || tf === "VK") v = v.replace(/\./g, ",");
+              (updated as any)[tf] = v;
+            }
           });
-          return newRows;
+          newRows[targetRow] = updated;
         });
-      }
+        setRowCount(String(newRows.length));
+        return newRows;
+      });
       
       toast({
         title: "Eingefügt",
@@ -1404,77 +1437,69 @@ const Index = () => {
     const pastedText = e.clipboardData.getData("text");
     if (!pastedText) return;
 
-    // Decide delimiter: TAB (Excel) > COMMA (CSV) > none.
-    // Free-text columns must not be split by comma (text can contain commas), only by tab.
-    const hasTab = pastedText.includes("\t");
-    const hasComma = pastedText.includes(",");
-    const hasNewline = /\r?\n/.test(pastedText.trim());
-    const isFreeTextField = field === "ItemName" || field === "Description";
+    const hasTab       = pastedText.includes("\t");
+    const hasSemicolon = pastedText.includes(";");
+    const hasNewline   = /\r?\n/.test(pastedText.trim());
 
-    // Free-text fields with newlines but no tab: paste the entire text as a single cell value.
-    if (isFreeTextField && !hasTab) {
-      if (hasNewline) {
+    // Description is a free-text blob — always one cell, newlines included.
+    if (field === "Description" && !hasTab && !hasSemicolon) {
+      e.preventDefault();
+      handleCellChange(rows[rowIndex].id, field, pastedText.trimEnd());
+      return;
+    }
+
+    // Single-value paste with no structure → native browser (except EK/VK decimal normalisation).
+    if (!hasTab && !hasSemicolon && !hasNewline) {
+      if (field === "EK" || field === "VK") {
         e.preventDefault();
-        handleCellChange(rows[rowIndex].id, field, pastedText.trimEnd());
+        handleCellChange(rows[rowIndex].id, field, pastedText.trim().replace(/\./g, ","));
       }
       return;
     }
 
-    // Single value paste -> let the browser handle it natively (except EK/VK which need . -> , normalization)
-    if (!hasTab && !hasNewline && !hasComma && field !== "EK" && field !== "VK") return;
-
-    // EK/VK single value paste: normalize . -> , and write via handleCellChange
-    if (!hasTab && !hasNewline && (field === "EK" || field === "VK")) {
-      e.preventDefault();
-      handleCellChange(rows[rowIndex].id, field, pastedText.trim().replace(/\./g, ","));
-      return;
-    }
-
-    // RFC4180-style parser: supports quoted fields with embedded newlines/delimiters.
+    // RFC4180 parser — handles quoted fields with embedded newlines/delimiters.
     const parse = (text: string, delim: string): string[][] => {
-      const rowsOut: string[][] = [];
+      const out: string[][] = [];
       let row: string[] = [];
       let cell = "";
-      let inQuotes = false;
+      let inQ = false;
       for (let i = 0; i < text.length; i++) {
         const ch = text[i];
-        if (inQuotes) {
-          if (ch === '"') {
-            if (text[i + 1] === '"') { cell += '"'; i++; }
-            else { inQuotes = false; }
-          } else { cell += ch; }
-        } else {
-          if (ch === '"') { inQuotes = true; }
-          else if (ch === delim) { row.push(cell); cell = ""; }
-          else if (ch === "\n") { row.push(cell); rowsOut.push(row); row = []; cell = ""; }
-          else if (ch === "\r") { /* skip, handled by \n */ }
+        if (inQ) {
+          if (ch === '"' && text[i + 1] === '"') { cell += '"'; i++; }
+          else if (ch === '"') { inQ = false; }
           else { cell += ch; }
+        } else {
+          if (ch === '"') { inQ = true; }
+          else if (ch === delim) { row.push(cell); cell = ""; }
+          else if (ch === "\n") { row.push(cell); out.push(row); row = []; cell = ""; }
+          else if (ch !== "\r") { cell += ch; }
         }
       }
       row.push(cell);
-      // Drop a trailing fully-empty row from a final newline.
-      if (!(row.length === 1 && row[0] === "")) rowsOut.push(row);
-      return rowsOut.filter(r => !(r.length === 1 && r[0].trim() === ""));
+      if (!(row.length === 1 && row[0] === "")) out.push(row);
+      return out.filter(r => r.some(c => c.trim() !== ""));
     };
 
+    // Delimiter priority: tab (Excel) → semicolon (CSV) → newline-only (single column).
     let matrix: string[][];
     if (hasTab) {
       matrix = parse(pastedText, "\t");
-    } else if (hasComma && !isFreeTextField) {
-      matrix = parse(pastedText, ",");
+    } else if (hasSemicolon) {
+      matrix = parse(pastedText, ";");
     } else {
-      // Newline-only: one column, many rows.
-      matrix = pastedText
-        .split(/\r?\n/)
-        .filter(l => l.trim() !== "")
-        .map(l => [l]);
+      // Newline-only: one value per row, one column.
+      matrix = pastedText.split(/\r?\n/).filter(l => l.trim() !== "").map(l => [l]);
     }
 
     if (matrix.length === 0) return;
     const maxCols = Math.max(1, ...matrix.map(r => r.length));
-    if (matrix.length <= 1 && maxCols <= 1) return;
+    // Single cell with a single value → let browser handle natively (already caught above for no-newline case).
+    if (matrix.length === 1 && maxCols === 1) return;
 
     e.preventDefault();
+    setHistory(prev => [...prev.slice(-49), rows]);
+    lastEditedCellRef.current = null;
     setRows(prev => {
       const newRows = [...prev];
       matrix.forEach((cells, i) => {
@@ -1484,10 +1509,10 @@ const Index = () => {
         cells.forEach((val, j) => {
           const targetCol = colIndex + j;
           if (targetCol < columns.length) {
-            const targetField = columns[targetCol].key as keyof ClothRow;
+            const tf = columns[targetCol].key as keyof ClothRow;
             let v = val.trim();
-            if (targetField === "EK" || targetField === "VK") v = v.replace(/\./g, ",");
-            (updated as any)[targetField] = v;
+            if (tf === "EK" || tf === "VK") v = v.replace(/\./g, ",");
+            (updated as any)[tf] = v;
           }
         });
         newRows[targetRow] = updated;
@@ -1495,7 +1520,7 @@ const Index = () => {
       setRowCount(String(newRows.length));
       return newRows;
     });
-    toast({ title: "Daten verteilt", description: `${matrix.length} × ${maxCols} Werte verteilt.` });
+    toast({ title: "Daten eingefügt", description: `${matrix.length} Zeile(n) × ${maxCols} Spalte(n) verteilt.` });
   };
 
 
