@@ -500,8 +500,7 @@ const Index = () => {
     });
     setCombineHAN(false);
   };
-  const [restructureName, setRestructureName] = useState(false);
-  const processedNamesRef = useRef<Record<string, string>>({});
+  const [isRestructuring, setIsRestructuring] = useState(false);
   const [isGeneratingTexts, setIsGeneratingTexts] = useState(false);
   const [textGenerating, setTextGenerating] = useState(false);
   const [textPreviewOpen, setTextPreviewOpen] = useState(false);
@@ -572,6 +571,7 @@ const Index = () => {
     Array.from({ length: 10 }, () => createEmptyRow())
   );
   const [history, setHistory] = useState<ClothRow[][]>([]);
+  const lastEditedCellRef = useRef<{ id: string; field: string } | null>(null);
   const [discount, setDiscount] = useState<string>("");
   const [selection, setSelection] = useState<CellPosition[]>([]);
   const [selectionStart, setSelectionStart] = useState<CellPosition | null>(null);
@@ -627,7 +627,7 @@ const Index = () => {
       const classifications = data?.classifications;
       if (!Array.isArray(classifications)) throw new Error("Invalid response");
 
-      setHistory(prev => [...prev.slice(-19), rows]);
+      setHistory(prev => [...prev.slice(-49), rows]);
       setRows(prev => {
         const newRows = [...prev];
         let classIdx = 0;
@@ -678,7 +678,7 @@ const Index = () => {
         nameMap[name] = translations[i]?.de || name;
       });
 
-      setHistory(prev => [...prev.slice(-19), rows]);
+      setHistory(prev => [...prev.slice(-49), rows]);
       setRows(prev => prev.map(row => {
         const original = getClothName(row).trim();
         if (!original || !nameMap[original]) return row;
@@ -829,46 +829,47 @@ const Index = () => {
     }
   }, [resizingColumn, handleResizeMove, handleResizeEnd]);
 
-  // Live AI restructuring of ItemName + color extraction when toggle is on
-  useEffect(() => {
-    if (!restructureName) return;
-    const timer = setTimeout(async () => {
-      const toProcess = rows.filter(r => {
-        const name = (r.ItemName || "").trim();
-        if (!name) return false;
-        return processedNamesRef.current[r.id] !== name;
-      });
-      if (toProcess.length === 0) return;
-
+  const handleRestructureNames = async () => {
+    const toProcess = rows.filter(r => (r.ItemName || "").trim() !== "");
+    if (toProcess.length === 0) {
+      toast({ title: t("noData", lang), description: t("noDataDesc", lang), variant: "destructive" });
+      return;
+    }
+    setIsRestructuring(true);
+    try {
       const items = toProcess.map(r => r.ItemName.trim());
-      try {
-        const { data, error } = await apiFetch('restructure-names', { items });
-        if (error || !data?.results) return;
-        const results: { name: string; color: string }[] = data.results;
-        setRows(prev => prev.map(row => {
-          const idx = toProcess.findIndex(r => r.id === row.id);
-          if (idx === -1) return row;
-          const res = results[idx];
-          if (!res) return row;
-          const newName = (res.name || "").trim();
-          const extractedColor = (res.color || "").trim().toLowerCase();
-          let newColor = row.color;
-          if (extractedColor) {
-            const existing = (row.color || "").trim();
-            if (!existing) newColor = extractedColor;
-            else if (!existing.toLowerCase().split("/").map(s => s.trim()).includes(extractedColor)) {
-              newColor = `${existing}/${extractedColor}`;
-            }
+      const { data, error } = await apiFetch('restructure-names', { items });
+      if (error) throw error;
+      const d = data as any;
+      if (!d?.results || !Array.isArray(d.results) || d.results.length !== items.length) throw new Error("Invalid response");
+      const results: { name: string; color: string }[] = d.results;
+      setHistory(prev => [...prev.slice(-49), rows]);
+      setRows(prev => prev.map(row => {
+        const idx = toProcess.findIndex(r => r.id === row.id);
+        if (idx === -1) return row;
+        const res = results[idx];
+        if (!res) return row;
+        const newName = (res.name || "").trim();
+        if (!newName) return row;
+        const extractedColor = (res.color || "").trim().toLowerCase();
+        let newColor = row.color;
+        if (extractedColor) {
+          const existing = (row.color || "").trim();
+          if (!existing) newColor = extractedColor;
+          else if (!existing.toLowerCase().split("/").map(s => s.trim()).includes(extractedColor)) {
+            newColor = `${existing}/${extractedColor}`;
           }
-          processedNamesRef.current[row.id] = newName;
-          return { ...row, ItemName: newName, color: newColor };
-        }));
-      } catch (e) {
-        console.error("restructure-names failed", e);
-      }
-    }, 900);
-    return () => clearTimeout(timer);
-  }, [restructureName, rows]);
+        }
+        return { ...row, ItemName: newName, color: newColor };
+      }));
+      toast({ title: lang === "DE" ? "Namen umstrukturiert" : "Names restructured", description: `${toProcess.length} ${lang === "DE" ? "Namen verarbeitet." : "names processed."}` });
+    } catch (err) {
+      console.error("restructure-names failed", err);
+      toast({ title: lang === "DE" ? "Fehler" : "Error", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
+    } finally {
+      setIsRestructuring(false);
+    }
+  };
 
   const baseColumns: { key: keyof ClothRow; label: string; width: string; isDropdown?: boolean; isMultiSelect?: boolean; resizable?: boolean; dropdownOptions?: string[]; translationMap?: Record<string, string> }[] = [
     { key: "Collection", label: t("colCollection", lang), width: "120px", resizable: true },
@@ -955,7 +956,7 @@ const Index = () => {
         return;
       }
       
-      setHistory(prev => [...prev.slice(-19), rows]);
+      setHistory(prev => [...prev.slice(-49), rows]);
       
       // Find first empty row or append
       const firstEmptyIndex = rows.findIndex(r => 
@@ -993,7 +994,11 @@ const Index = () => {
 
   const handleCellChange = (id: string, field: keyof ClothRow, value: string, saveHistory = true) => {
     if (saveHistory) {
-      setHistory(prev => [...prev.slice(-19), rows]);
+      const cellKey = `${id}:${field}`;
+      if (lastEditedCellRef.current?.id !== id || lastEditedCellRef.current?.field !== field) {
+        setHistory(prev => [...prev.slice(-49), rows]);
+        lastEditedCellRef.current = { id, field };
+      }
     }
     
     // Check if value is a formula
@@ -1026,6 +1031,7 @@ const Index = () => {
       const previousState = history[history.length - 1];
       setRows(previousState);
       setHistory(prev => prev.slice(0, -1));
+      lastEditedCellRef.current = null;
       toast({
         title: "Rückgängig",
         description: "Letzte Änderung wurde rückgängig gemacht.",
@@ -1034,22 +1040,24 @@ const Index = () => {
   };
 
   const handleHeaderDropdownChange = (colKey: keyof ClothRow, value: string) => {
-    setHistory(prev => [...prev.slice(-19), rows]);
+    setHistory(prev => [...prev.slice(-49), rows]);
     setRows(prev => prev.map(row => 
       getClothName(row).trim() !== "" ? { ...row, [colKey]: value } : row
     ));
   };
 
-  // Fill down to a specific range (for drag)
+  // Fill to a specific range (drag up or down)
   const handleFillToRange = (sourceRow: number, colIndex: number, targetRow: number) => {
     const field = columns[colIndex].key;
     const value = rows[sourceRow][field];
-    if (!value || targetRow <= sourceRow) return;
-    
-    setHistory(prev => [...prev.slice(-19), rows]);
-    const fillCount = targetRow - sourceRow;
-    setRows(prev => prev.map((row, idx) => 
-      idx > sourceRow && idx <= targetRow ? { ...row, [field]: value } : row
+    if (!value || targetRow === sourceRow) return;
+
+    const minRow = Math.min(sourceRow, targetRow);
+    const maxRow = Math.max(sourceRow, targetRow);
+    setHistory(prev => [...prev.slice(-49), rows]);
+    const fillCount = maxRow - minRow;
+    setRows(prev => prev.map((row, idx) =>
+      idx >= minRow && idx <= maxRow && idx !== sourceRow ? { ...row, [field]: value } : row
     ));
     toast({
       title: "Werte übernommen",
@@ -1093,16 +1101,16 @@ const Index = () => {
     });
   };
 
-  // Handle fill handle drag move
+  // Handle fill handle drag move — allow both up and down
   const handleFillHandleDragMove = useCallback((rowIndex: number) => {
-    if (fillHandleDrag && rowIndex > fillHandleDrag.sourceRow) {
+    if (fillHandleDrag) {
       setFillHandleDrag(prev => prev ? { ...prev, targetRow: rowIndex } : null);
     }
   }, [fillHandleDrag]);
 
-  // Handle fill handle drag end
+  // Handle fill handle drag end — works up or down
   const handleFillHandleDragEnd = useCallback(() => {
-    if (fillHandleDrag && fillHandleDrag.targetRow > fillHandleDrag.sourceRow) {
+    if (fillHandleDrag && fillHandleDrag.targetRow !== fillHandleDrag.sourceRow) {
       handleFillToRange(fillHandleDrag.sourceRow, fillHandleDrag.sourceCol, fillHandleDrag.targetRow);
     }
     setFillHandleDrag(null);
@@ -1148,13 +1156,18 @@ const Index = () => {
       const maxCol = Math.max(...selection.map(s => s.col));
       
       const isSingleColumn = minCol === maxCol;
-      const isSingleCellClipboard = lines.length === 1 && !text.includes("\t") && !text.includes(";");
-      
-      setHistory(prev => [...prev.slice(-19), rows]);
-      
+      const targetField = columns[minCol].key as keyof ClothRow;
+      const isFreeTextField = targetField === "Description" || targetField === "ItemName";
+      // For free-text fields selected as single column: always paste entire clipboard as one value.
+      const isSingleCellClipboard =
+        (isSingleColumn && isFreeTextField) ||
+        (lines.length === 1 && !text.includes("\t") && !text.includes(";"));
+
+      setHistory(prev => [...prev.slice(-49), rows]);
+
       if (isSingleCellClipboard) {
-        const field = columns[minCol].key;
-        const value = field === "EK" || field === "VK" ? text.trim().replace(/\./g, ",") : text.trim();
+        const field = targetField;
+        const value = field === "EK" || field === "VK" ? text.trim().replace(/\./g, ",") : text.trimEnd();
         setRows(prev => {
           const newRows = [...prev];
           newRows[minRow] = { ...newRows[minRow], [field]: value };
@@ -1195,7 +1208,7 @@ const Index = () => {
   const handleDeleteSelection = useCallback(() => {
     if (selection.length === 0) return;
     
-    setHistory(prev => [...prev.slice(-19), rows]);
+    setHistory(prev => [...prev.slice(-49), rows]);
     
     setRows(prev => {
       const newRows = [...prev];
@@ -1216,7 +1229,7 @@ const Index = () => {
   const handleFindReplace = useCallback((findValue: string, replaceValue: string, scope: "all" | "selection") => {
     if (!findValue) return;
     
-    setHistory(prev => [...prev.slice(-19), rows]);
+    setHistory(prev => [...prev.slice(-49), rows]);
     
     let replacementCount = 0;
     
@@ -1398,8 +1411,17 @@ const Index = () => {
     const hasNewline = /\r?\n/.test(pastedText.trim());
     const isFreeTextField = field === "ItemName" || field === "Description";
 
+    // Free-text fields with newlines but no tab: paste the entire text as a single cell value.
+    if (isFreeTextField && !hasTab) {
+      if (hasNewline) {
+        e.preventDefault();
+        handleCellChange(rows[rowIndex].id, field, pastedText.trimEnd());
+      }
+      return;
+    }
+
     // Single value paste -> let the browser handle it natively (except EK/VK which need . -> , normalization)
-    if (!hasTab && !hasNewline && (isFreeTextField || !hasComma) && field !== "EK" && field !== "VK") return;
+    if (!hasTab && !hasNewline && !hasComma && field !== "EK" && field !== "VK") return;
 
     // EK/VK single value paste: normalize . -> , and write via handleCellChange
     if (!hasTab && !hasNewline && (field === "EK" || field === "VK")) {
@@ -2019,13 +2041,15 @@ const Index = () => {
                             )}
                             {col.key === "ItemName" && (
                               <>
-                                <Switch
-                                  checked={restructureName}
-                                  onCheckedChange={(v) => { setRestructureName(v); if (!v) processedNamesRef.current = {}; }}
-                                  onClick={(e) => e.stopPropagation()}
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); handleRestructureNames(); }}
+                                  className="px-1.5 py-0.5 text-[10px] rounded bg-primary text-primary-foreground hover:bg-primary/90"
                                   title={lang === "DE" ? "KI: Name umstrukturieren & Farbe extrahieren" : "AI: Restructure name & extract color"}
-                                  className="scale-75"
-                                />
+                                  disabled={isRestructuring}
+                                >
+                                  {isRestructuring ? "..." : "Re"}
+                                </button>
                                 <button
                                   type="button"
                                   onClick={(e) => { e.stopPropagation(); handleTranslateNames(); }}
@@ -2063,10 +2087,11 @@ const Index = () => {
                     </td>
                     {columns.map((col, colIndex) => {
                       const isSelected = isCellSelected(rowIndex, colIndex);
-                      const isInFillRange = fillHandleDrag && 
+                      const isInFillRange = fillHandleDrag &&
                         colIndex === fillHandleDrag.sourceCol &&
-                        rowIndex > fillHandleDrag.sourceRow && 
-                        rowIndex <= fillHandleDrag.targetRow;
+                        rowIndex !== fillHandleDrag.sourceRow &&
+                        rowIndex >= Math.min(fillHandleDrag.sourceRow, fillHandleDrag.targetRow) &&
+                        rowIndex <= Math.max(fillHandleDrag.sourceRow, fillHandleDrag.targetRow);
                       const cellValue = col.key === "HAN" && combineHAN && !hanFixed[row.id]
                         ? [row.HAN, row.color, row.Size].map(v => (v || "").trim()).filter(Boolean).join(" ")
                         : row[col.key];

@@ -109,29 +109,37 @@ app.post('/api/restructure-names', async (req, res) => {
     const { items } = req.body;
     if (!items || !Array.isArray(items) || items.length === 0) throw new Error('items array is required');
 
-    const prompt = `You restructure product names so the MAIN ITEM TYPE comes first, followed by the brand/model name, then descriptive attributes. Also extract any color word found in the name.
+    const prompt = `You restructure product names for a children's store. The FULL product type (all words that describe what the object IS) must come first, followed by brand/model, then other attributes. Also extract any color.
 
 Rules:
-- Move the main noun (item type like "Table", "Chair", "Lamp", "T-Shirt", "Jacket", "Bag", "Shoes", "Dress") to the FRONT.
-- Keep the rest of the words in their original order after the item type.
-- Use Title Case for each word.
-- Extract any color word (English or German) from the name into a separate "color" field, lowercase. Remove it from the name.
-  Colors include: red, blue, green, yellow, black, white, grey/gray, brown, pink, orange, purple, violet, turquoise, beige, navy, mint, sand, cream, ivory, rosa, blau, grün, gelb, schwarz, weiß, grau, braun, rot, türkis, violett.
-- If no color, return empty string for color.
-- If you cannot identify a clear item type, keep the name as-is (just Title Case) and still extract color.
+- Identify ALL words that together form the product type (e.g. "Long Sleeve Jacket", "Rain Pants", "Snow Suit", "High Chair", "Changing Table", "Sleeping Bag") and move them ALL to the front as a group — never split a multi-word product type.
+- Keep brand names, model codes, and non-type descriptors after the product type, in their original relative order.
+- Use Title Case for every word.
+- Extract any color word into "color" (lowercase). Remove it from the name. Colors: red, blue, green, yellow, black, white, grey, gray, brown, pink, orange, purple, violet, turquoise, beige, navy, mint, sand, cream, ivory, olive, camel, stone, sage, forest, hazel, burgundy, and their German equivalents (rosa, blau, grün, gelb, schwarz, weiß, grau, braun, rot, türkis, violett).
+- If no clear product type, keep original word order (just apply Title Case) and still extract color.
+- NEVER return an empty name — if unsure, return the original name in Title Case.
+- You MUST return exactly ${items.length} results, one per input item, in the same order.
 
-Items:
+Items (${items.length} total):
 ${items.map((it, i) => `${i + 1}. ${it}`).join('\n')}
 
-Respond ONLY with a JSON array (no markdown, no code fences). Each element MUST have exactly: {"name": "...", "color": "..."}.
+Respond ONLY with JSON: {"results":[{"name":"...","color":"..."},...]}
+No markdown. Exactly ${items.length} elements.
 
-Example input: "Nori Table stainless red"
-Example output element: {"name": "Table Nori Stainless", "color": "red"}`;
+Examples:
+"nori jacket long sleeve red" → {"name":"Jacket Long Sleeve Nori","color":"red"}
+"Stainless Table Nori" → {"name":"Table Nori Stainless","color":""}
+"rain pants kids navy 2024" → {"name":"Rain Pants Kids 2024","color":"navy"}`;
 
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'gpt-4.1-nano', messages: [{ role: 'user', content: prompt }], temperature: 0.2 }),
+      body: JSON.stringify({
+        model: 'gpt-4.1-mini',
+        messages: [{ role: 'user', content: prompt }],
+        response_format: { type: 'json_object' },
+        temperature: 0.1,
+      }),
     });
 
     if (!response.ok) {
@@ -147,10 +155,19 @@ Example output element: {"name": "Table Nori Stainless", "color": "red"}`;
 
     let results;
     try {
-      results = JSON.parse(content);
+      const parsed = JSON.parse(content);
+      results = Array.isArray(parsed) ? parsed : (parsed.results || parsed.items || Object.values(parsed)[0]);
+      if (!Array.isArray(results)) throw new Error('Not an array');
     } catch {
       throw new Error('AI returned invalid JSON');
     }
+
+    // Safety: ensure count matches — pad with originals if short
+    while (results.length < items.length) {
+      const i = results.length;
+      results.push({ name: items[i], color: '' });
+    }
+    results = results.slice(0, items.length);
 
     res.json({ results });
   } catch (error) {
