@@ -1,5 +1,6 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FindReplaceDialog } from "@/components/FindReplaceDialog";
@@ -12,7 +13,7 @@ export interface CategoryPreviewRow {
   artikelnummer: string;
   han: string;
   barcode: string;
-  categoryPaths: string[]; // each is a full path e.g. "Mode -> Kindermode -> T-Shirts & Tops"
+  categoryPaths: string[];
 }
 
 interface Props {
@@ -23,140 +24,102 @@ interface Props {
   lang: "DE" | "EN";
 }
 
-// ── Tree node component (recursive) ──────────────────────────────────────────
+// ── Recursive tree node ───────────────────────────────────────────────────────
+
+function nodeMatchesQuery(node: CategoryNode, path: string, q: string): boolean {
+  if (!q) return true;
+  if (path.toLowerCase().includes(q)) return true;
+  return (node.children ?? []).some(c => nodeMatchesQuery(c, `${path} -> ${c.name}`, q));
+}
 
 interface TreeNodeProps {
   node: CategoryNode;
   fullPath: string;
-  selectedPaths: Set<string>;
+  selected: Set<string>;
   onToggle: (path: string) => void;
-  searchQuery: string;
+  query: string;
   depth: number;
 }
 
-function matchesQuery(node: CategoryNode, path: string, q: string): boolean {
-  if (!q) return true;
-  if (path.toLowerCase().includes(q)) return true;
-  return (node.children || []).some(c => matchesQuery(c, `${path} -> ${c.name}`, q));
-}
-
-function TreeNode({ node, fullPath, selectedPaths, onToggle, searchQuery, depth }: TreeNodeProps) {
-  const q = searchQuery.toLowerCase();
-  const visible = matchesQuery(node, fullPath, q);
+function TreeNode({ node, fullPath, selected, onToggle, query, depth }: TreeNodeProps) {
+  const q = query.toLowerCase();
   const hasChildren = !!(node.children?.length);
+  const visible = nodeMatchesQuery(node, fullPath, q);
   const [expanded, setExpanded] = useState(depth === 0);
 
-  // Auto-expand when searching
   useEffect(() => {
-    if (q) setExpanded(true);
-    else if (depth > 0) setExpanded(false);
+    setExpanded(q ? true : depth === 0);
   }, [q, depth]);
 
   if (!visible) return null;
 
-  const isChecked = selectedPaths.has(fullPath);
+  const checked = selected.has(fullPath);
 
   return (
     <div>
       <div
         className={cn(
-          "flex items-center gap-1 py-[3px] px-1 rounded cursor-pointer hover:bg-accent/60 select-none",
-          isChecked && "bg-primary/8 font-medium"
+          "flex items-center gap-1.5 py-[3px] rounded cursor-pointer hover:bg-accent/60 select-none",
+          checked && "bg-primary/10"
         )}
         style={{ paddingLeft: `${depth * 14 + 4}px` }}
+        onClick={() => onToggle(fullPath)}
       >
-        {hasChildren ? (
-          <button
-            className="flex-none text-muted-foreground hover:text-foreground"
-            onClick={(e) => { e.stopPropagation(); setExpanded(v => !v); }}
-          >
-            <ChevronRight className={cn("h-3 w-3 transition-transform", expanded && "rotate-90")} />
-          </button>
-        ) : (
-          <span className="w-3 flex-none" />
-        )}
+        <button
+          className="flex-none text-muted-foreground"
+          style={{ visibility: hasChildren ? "visible" : "hidden", width: 14 }}
+          onClick={e => { e.stopPropagation(); setExpanded(v => !v); }}
+        >
+          <ChevronRight className={cn("h-3 w-3 transition-transform", expanded && "rotate-90")} />
+        </button>
         <input
           type="checkbox"
-          checked={isChecked}
-          onChange={() => onToggle(fullPath)}
-          className="accent-primary cursor-pointer flex-none"
-          onClick={e => e.stopPropagation()}
+          checked={checked}
+          readOnly
+          className="accent-primary cursor-pointer flex-none w-3.5 h-3.5"
+          onClick={e => { e.stopPropagation(); onToggle(fullPath); }}
         />
-        <span className="text-xs leading-snug flex-1" onClick={() => onToggle(fullPath)}>
-          {node.name}
-        </span>
+        <span className="text-xs leading-snug flex-1">{node.name}</span>
       </div>
-      {hasChildren && expanded && (
-        <div>
-          {node.children!.map(child => (
-            <TreeNode
-              key={child.name}
-              node={child}
-              fullPath={`${fullPath} -> ${child.name}`}
-              selectedPaths={selectedPaths}
-              onToggle={onToggle}
-              searchQuery={searchQuery}
-              depth={depth + 1}
-            />
-          ))}
-        </div>
-      )}
+      {hasChildren && expanded && node.children!.map(child => (
+        <TreeNode
+          key={child.name}
+          node={child}
+          fullPath={`${fullPath} -> ${child.name}`}
+          selected={selected}
+          onToggle={onToggle}
+          query={query}
+          depth={depth + 1}
+        />
+      ))}
     </div>
   );
 }
 
-// ── Category picker popup ─────────────────────────────────────────────────────
+// ── Category picker (used inside Popover) ─────────────────────────────────────
 
-interface PickerProps {
+interface PickerContentProps {
   currentPaths: string[];
   onApply: (paths: string[]) => void;
   onClose: () => void;
-  anchorRef: React.RefObject<HTMLElement>;
 }
 
-function CategoryPicker({ currentPaths, onApply, onClose, anchorRef }: PickerProps) {
+function PickerContent({ currentPaths, onApply, onClose }: PickerContentProps) {
   const [selected, setSelected] = useState<Set<string>>(() => new Set(currentPaths));
   const [search, setSearch] = useState("");
-  const pickerRef = useRef<HTMLDivElement>(null);
-
-  // Position below anchor
-  const [pos, setPos] = useState({ top: 0, left: 0 });
-  useEffect(() => {
-    if (anchorRef.current) {
-      const rect = anchorRef.current.getBoundingClientRect();
-      setPos({ top: rect.bottom + 4, left: rect.left });
-    }
-  }, [anchorRef]);
-
-  // Close on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (pickerRef.current && !pickerRef.current.contains(e.target as Node) &&
-          anchorRef.current && !anchorRef.current.contains(e.target as Node)) {
-        onClose();
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [onClose, anchorRef]);
 
   const toggle = useCallback((path: string) => {
     setSelected(prev => {
       const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
+      next.has(path) ? next.delete(path) : next.add(path);
       return next;
     });
   }, []);
 
   return (
-    <div
-      ref={pickerRef}
-      className="fixed z-[200] bg-background border border-border rounded-lg shadow-xl flex flex-col"
-      style={{ top: pos.top, left: pos.left, width: 320, maxHeight: 480 }}
-    >
-      {/* search */}
-      <div className="p-2 border-b border-border flex items-center gap-1.5">
+    <div className="flex flex-col" style={{ width: 320, maxHeight: 460 }}>
+      {/* Search */}
+      <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-border">
         <Search className="h-3.5 w-3.5 text-muted-foreground flex-none" />
         <Input
           autoFocus
@@ -167,27 +130,27 @@ function CategoryPicker({ currentPaths, onApply, onClose, anchorRef }: PickerPro
         />
       </div>
 
-      {/* tree */}
-      <div className="flex-1 overflow-y-auto p-1">
+      {/* Tree */}
+      <div className="flex-1 overflow-y-auto p-1 min-h-0" style={{ maxHeight: 340 }}>
         {CATEGORY_TREE.map(node => (
           <TreeNode
             key={node.name}
             node={node}
             fullPath={node.name}
-            selectedPaths={selected}
+            selected={selected}
             onToggle={toggle}
-            searchQuery={search}
+            query={search}
             depth={0}
           />
         ))}
       </div>
 
-      {/* footer */}
-      <div className="p-2 border-t border-border flex items-center justify-between gap-2">
+      {/* Footer */}
+      <div className="flex items-center justify-between gap-2 px-2 py-1.5 border-t border-border">
         <span className="text-xs text-muted-foreground">{selected.size} gewählt</span>
         <div className="flex gap-1.5">
-          <Button variant="ghost" size="sm" onClick={onClose} className="h-7 text-xs">Abbrechen</Button>
-          <Button size="sm" onClick={() => onApply([...selected])} className="h-7 text-xs">Übernehmen</Button>
+          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={onClose}>Abbrechen</Button>
+          <Button size="sm" className="h-7 text-xs" onClick={() => { onApply([...selected]); onClose(); }}>Übernehmen</Button>
         </div>
       </div>
     </div>
@@ -203,11 +166,16 @@ export const CategoryPreviewModal = ({ open, onOpenChange, initialRows, onConfir
   const [filterText, setFilterText] = useState("");
   const [findReplaceOpen, setFindReplaceOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [pickerRowId, setPickerRowId] = useState<string | null>(null);
-  const pickerAnchorRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const [openPickerId, setOpenPickerId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (open) { setRows(initialRows); setHistory([]); setRedoStack([]); setSelectedIds(new Set()); }
+    if (open) {
+      setRows(initialRows);
+      setHistory([]);
+      setRedoStack([]);
+      setSelectedIds(new Set());
+      setOpenPickerId(null);
+    }
   }, [open, initialRows]);
 
   const pushHistory = useCallback((prev: CategoryPreviewRow[]) => {
@@ -222,7 +190,8 @@ export const CategoryPreviewModal = ({ open, onOpenChange, initialRows, onConfir
     });
   }, [pushHistory]);
 
-  const removePath = useCallback((rowId: string, path: string) => {
+  const removePath = useCallback((rowId: string, path: string, e: React.MouseEvent) => {
+    e.stopPropagation();
     setRows(prev => {
       pushHistory(prev);
       return prev.map(r => r.id === rowId ? { ...r, categoryPaths: r.categoryPaths.filter(p => p !== path) } : r);
@@ -254,26 +223,21 @@ export const CategoryPreviewModal = ({ open, onOpenChange, initialRows, onConfir
       pushHistory(prev);
       return prev.map(r => {
         if (scope === "selection" && !selectedIds.has(r.id)) return r;
-        return {
-          ...r,
-          categoryPaths: r.categoryPaths.map(p => p.split(find).join(replace)),
-        };
+        return { ...r, categoryPaths: r.categoryPaths.map(p => p.split(find).join(replace)) };
       });
     });
   }, [pushHistory, selectedIds]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.ctrlKey || e.metaKey) {
-      if (e.key === "z") { e.preventDefault(); handleUndo(); }
-      if (e.key === "y") { e.preventDefault(); handleRedo(); }
-      if (e.key === "h") { e.preventDefault(); setFindReplaceOpen(true); }
-    }
-    if (e.key === "Escape" && pickerRowId) setPickerRowId(null);
-  }, [handleUndo, handleRedo, pickerRowId]);
+    if ((e.ctrlKey || e.metaKey) && e.key === "z") { e.preventDefault(); handleUndo(); }
+    if ((e.ctrlKey || e.metaKey) && e.key === "y") { e.preventDefault(); handleRedo(); }
+    if ((e.ctrlKey || e.metaKey) && e.key === "h") { e.preventDefault(); setFindReplaceOpen(true); }
+  }, [handleUndo, handleRedo]);
 
   const q = filterText.toLowerCase();
   const filtered = useMemo(() => rows.filter(r =>
-    !q || r.artikelnummer.toLowerCase().includes(q) ||
+    !q ||
+    r.artikelnummer.toLowerCase().includes(q) ||
     r.categoryPaths.some(p => p.toLowerCase().includes(q))
   ), [rows, q]);
 
@@ -283,80 +247,87 @@ export const CategoryPreviewModal = ({ open, onOpenChange, initialRows, onConfir
       if (e.shiftKey && prev.size > 0) {
         const ids = filtered.map(r => r.id);
         const last = [...prev].pop()!;
-        const from = ids.indexOf(last);
-        const to = ids.indexOf(id);
+        const [from, to] = [ids.indexOf(last), ids.indexOf(id)];
         const [a, b] = from < to ? [from, to] : [to, from];
         ids.slice(a, b + 1).forEach(i => next.add(i));
       } else if (e.ctrlKey || e.metaKey) {
-        if (next.has(id)) next.delete(id); else next.add(id);
+        next.has(id) ? next.delete(id) : next.add(id);
       } else {
-        if (next.size === 1 && next.has(id)) next.clear(); else { next.clear(); next.add(id); }
+        if (next.size === 1 && next.has(id)) next.clear();
+        else { next.clear(); next.add(id); }
       }
       return next;
     });
   };
 
-  // Build display label for a path (last 2 parts)
   const pathLabel = (path: string) => {
     const parts = path.split(" -> ");
     return parts.length > 2 ? `…/${parts.slice(-2).join("/")}` : parts.join("/");
   };
 
-  const pickerRow = pickerRowId ? rows.find(r => r.id === pickerRowId) : null;
-
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) setPickerRowId(null); onOpenChange(v); }}>
-      <DialogContent
-        className="max-w-5xl w-[95vw] h-[85vh] flex flex-col p-0 gap-0"
-        onKeyDown={handleKeyDown}
+    <>
+      <Dialog
+        open={open}
+        onOpenChange={(v) => {
+          if (!v) setOpenPickerId(null);
+          onOpenChange(v);
+        }}
       >
-        <DialogHeader className="px-4 pt-4 pb-2 border-b border-border shrink-0">
-          <DialogTitle className="text-base">{lang === "DE" ? "Kategorien Vorschau" : "Category Preview"}</DialogTitle>
-        </DialogHeader>
+        <DialogContent
+          className="max-w-5xl w-[95vw] h-[85vh] flex flex-col p-0 gap-0"
+          onKeyDown={handleKeyDown}
+          // prevent Dialog from closing when Radix Popover portal is clicked
+          onInteractOutside={e => {
+            const target = e.target as Element;
+            if (target?.closest("[data-radix-popper-content-wrapper]")) e.preventDefault();
+          }}
+        >
+          <DialogHeader className="px-4 pt-4 pb-2 border-b border-border shrink-0">
+            <DialogTitle className="text-base">
+              {lang === "DE" ? "Kategorien Vorschau" : "Category Preview"}
+            </DialogTitle>
+          </DialogHeader>
 
-        {/* Toolbar */}
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-border shrink-0 flex-wrap">
-          <Input
-            value={filterText}
-            onChange={e => setFilterText(e.target.value)}
-            placeholder={lang === "DE" ? "Filtern..." : "Filter..."}
-            className="h-7 w-48 text-xs"
-          />
-          <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => setFindReplaceOpen(true)}>
-            Suchen & Ersetzen
-          </Button>
-          <Button variant="outline" size="sm" className="h-7 px-2" onClick={handleUndo} disabled={!history.length} title="Ctrl+Z">
-            ↩
-          </Button>
-          <Button variant="outline" size="sm" className="h-7 px-2" onClick={handleRedo} disabled={!redoStack.length} title="Ctrl+Y">
-            ↪
-          </Button>
-          <span className="text-xs text-muted-foreground ml-auto">{filtered.length} {lang === "DE" ? "Produkte" : "products"}</span>
-        </div>
+          {/* Toolbar */}
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-border shrink-0 flex-wrap">
+            <Input
+              value={filterText}
+              onChange={e => setFilterText(e.target.value)}
+              placeholder={lang === "DE" ? "Filtern..." : "Filter..."}
+              className="h-7 w-44 text-xs"
+            />
+            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setFindReplaceOpen(true)}>
+              Suchen & Ersetzen
+            </Button>
+            <Button variant="outline" size="sm" className="h-7 px-2" onClick={handleUndo} disabled={!history.length} title="Ctrl+Z">↩</Button>
+            <Button variant="outline" size="sm" className="h-7 px-2" onClick={handleRedo} disabled={!redoStack.length} title="Ctrl+Y">↪</Button>
+            <span className="text-xs text-muted-foreground ml-auto">
+              {filtered.length} {lang === "DE" ? "Produkte" : "products"}
+            </span>
+          </div>
 
-        {/* Table */}
-        <div className="flex-1 overflow-auto">
-          <table className="w-full text-xs border-collapse">
-            <thead className="sticky top-0 z-10 bg-muted/80 backdrop-blur-sm">
-              <tr>
-                <th className="w-8 border-b border-border p-1.5 text-center font-medium text-muted-foreground">#</th>
-                <th className="w-40 border-b border-border p-1.5 text-left font-medium text-muted-foreground whitespace-nowrap">Artikelnummer</th>
-                <th className="w-28 border-b border-border p-1.5 text-left font-medium text-muted-foreground">HAN</th>
-                <th className="w-32 border-b border-border p-1.5 text-left font-medium text-muted-foreground">Barcode</th>
-                <th className="border-b border-border p-1.5 text-left font-medium text-muted-foreground">
-                  {lang === "DE" ? "Kategorien" : "Categories"}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((row, idx) => {
-                const isSelected = selectedIds.has(row.id);
-                return (
+          {/* Table */}
+          <div className="flex-1 overflow-auto">
+            <table className="w-full text-xs border-collapse">
+              <thead className="sticky top-0 z-10 bg-muted/80 backdrop-blur-sm">
+                <tr>
+                  <th className="w-8 border-b border-border p-1.5 text-center font-medium text-muted-foreground">#</th>
+                  <th className="w-40 border-b border-border p-1.5 text-left font-medium text-muted-foreground">Artikelnummer</th>
+                  <th className="w-28 border-b border-border p-1.5 text-left font-medium text-muted-foreground">HAN</th>
+                  <th className="w-28 border-b border-border p-1.5 text-left font-medium text-muted-foreground">Barcode</th>
+                  <th className="border-b border-border p-1.5 text-left font-medium text-muted-foreground">
+                    {lang === "DE" ? "Kategorien" : "Categories"}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((row, idx) => (
                   <tr
                     key={row.id}
                     className={cn(
-                      "border-b border-border/50 hover:bg-accent/30 cursor-pointer",
-                      isSelected && "bg-primary/5"
+                      "border-b border-border/40 hover:bg-accent/30 cursor-pointer",
+                      selectedIds.has(row.id) && "bg-primary/5"
                     )}
                     onClick={e => toggleRowSelect(row.id, e)}
                   >
@@ -366,76 +337,86 @@ export const CategoryPreviewModal = ({ open, onOpenChange, initialRows, onConfir
                     <td className="p-1.5 text-muted-foreground">{row.barcode}</td>
                     <td className="p-1.5">
                       <div className="flex items-center gap-1 flex-wrap">
-                        {/* Path chips */}
+
+                        {/* Assigned path chips */}
                         {row.categoryPaths.map(path => (
                           <span
                             key={path}
                             title={path}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 text-[11px] max-w-[260px] group"
+                            className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 text-[11px] max-w-[260px] group"
                           >
                             <span className="truncate">{pathLabel(path)}</span>
                             <button
-                              className="opacity-0 group-hover:opacity-100 hover:text-red-500 flex-none"
-                              onClick={e => { e.stopPropagation(); removePath(row.id, path); }}
+                              className="flex-none opacity-40 group-hover:opacity-100 hover:text-red-500 transition-opacity"
+                              onClick={e => removePath(row.id, path, e)}
                             >
                               <X className="h-2.5 w-2.5" />
                             </button>
                           </span>
                         ))}
-                        {/* + button */}
-                        <button
-                          ref={el => {
-                            if (el) pickerAnchorRefs.current.set(row.id, el);
-                            else pickerAnchorRefs.current.delete(row.id);
-                          }}
-                          className="inline-flex items-center justify-center w-5 h-5 rounded-full border border-dashed border-muted-foreground/50 hover:border-primary hover:text-primary text-muted-foreground transition-colors"
-                          onClick={e => { e.stopPropagation(); setPickerRowId(prev => prev === row.id ? null : row.id); }}
-                          title={lang === "DE" ? "Kategorie hinzufügen" : "Add category"}
+
+                        {/* + button with Popover */}
+                        <Popover
+                          open={openPickerId === row.id}
+                          onOpenChange={v => setOpenPickerId(v ? row.id : null)}
                         >
-                          <Plus className="h-3 w-3" />
-                        </button>
+                          <PopoverTrigger asChild>
+                            <button
+                              className="inline-flex items-center justify-center w-5 h-5 rounded-full border border-dashed border-muted-foreground/40 hover:border-primary hover:text-primary text-muted-foreground transition-colors"
+                              onClick={e => e.stopPropagation()}
+                              title={lang === "DE" ? "Kategorie hinzufügen" : "Add category"}
+                            >
+                              <Plus className="h-3 w-3" />
+                            </button>
+                          </PopoverTrigger>
+                          <PopoverContent
+                            className="p-0 overflow-hidden"
+                            style={{ width: 320 }}
+                            align="start"
+                            side="bottom"
+                            sideOffset={6}
+                            // keep Dialog open when clicking inside picker
+                            onInteractOutside={e => e.preventDefault()}
+                          >
+                            <PickerContent
+                              currentPaths={row.categoryPaths}
+                              onApply={paths => updatePaths(row.id, paths)}
+                              onClose={() => setOpenPickerId(null)}
+                            />
+                          </PopoverContent>
+                        </Popover>
+
                       </div>
                     </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between px-4 py-3 border-t border-border shrink-0">
-          <span className="text-xs text-muted-foreground">
-            {selectedIds.size > 0 ? `${selectedIds.size} ${lang === "DE" ? "ausgewählt" : "selected"}` : ""}
-          </span>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
-              {lang === "DE" ? "Abbrechen" : "Cancel"}
-            </Button>
-            <Button size="sm" onClick={() => { onConfirm(rows); onOpenChange(false); }}>
-              {lang === "DE" ? "Bestätigen & exportieren" : "Confirm & export"}
-            </Button>
+                ))}
+              </tbody>
+            </table>
           </div>
-        </div>
-      </DialogContent>
 
-      {/* Find & Replace */}
+          {/* Footer */}
+          <div className="flex items-center justify-between px-4 py-3 border-t border-border shrink-0">
+            <span className="text-xs text-muted-foreground">
+              {selectedIds.size > 0 ? `${selectedIds.size} ${lang === "DE" ? "ausgewählt" : "selected"}` : ""}
+            </span>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+                {lang === "DE" ? "Abbrechen" : "Cancel"}
+              </Button>
+              <Button size="sm" onClick={() => { onConfirm(rows); onOpenChange(false); }}>
+                {lang === "DE" ? "Bestätigen & exportieren" : "Confirm & export"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <FindReplaceDialog
         open={findReplaceOpen}
         onOpenChange={setFindReplaceOpen}
         onReplace={handleFindReplace}
         hasSelection={selectedIds.size > 0}
       />
-
-      {/* Category picker popup */}
-      {pickerRowId && pickerRow && (
-        <CategoryPicker
-          currentPaths={pickerRow.categoryPaths}
-          anchorRef={{ current: pickerAnchorRefs.current.get(pickerRowId) ?? null } as React.RefObject<HTMLElement>}
-          onApply={(paths) => { updatePaths(pickerRowId, paths); setPickerRowId(null); }}
-          onClose={() => setPickerRowId(null)}
-        />
-      )}
-    </Dialog>
+    </>
   );
 };
