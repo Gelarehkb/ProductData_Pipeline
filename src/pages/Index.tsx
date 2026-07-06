@@ -2401,11 +2401,13 @@ const Index = () => {
           </div>
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex gap-3 items-end flex-wrap">
-          <div className="space-y-2">
-            <Label htmlFor="rowCount">{t("rowCount", lang)}</Label>
-            <Input 
+        {/* Action toolbar */}
+        <div className="flex items-center gap-2 flex-wrap mt-4">
+
+          {/* ── Row count + undo ── */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-muted-foreground whitespace-nowrap">{t("rowCount", lang)}</span>
+            <Input
               id="rowCount"
               type="number"
               value={rowCount}
@@ -2414,93 +2416,93 @@ const Index = () => {
                 const count = parseInt(e.target.value) || 0;
                 if (count > 0) setRowsCount(count);
               }}
-              className="w-32"
+              className="h-8 w-20 text-sm"
               min="1"
             />
+            <Button
+              onClick={handleUndo}
+              variant="outline"
+              size="sm"
+              disabled={history.length === 0}
+              title={t("undoTitle", lang)}
+            >
+              <Undo2 className="h-3.5 w-3.5" />
+            </Button>
           </div>
-          <Button 
-            onClick={handleUndo} 
-            variant="outline" 
-            size="icon"
-            disabled={history.length === 0}
-            className="h-9 w-9"
-            title={t("undoTitle", lang)}
-          >
-            <Undo2 className="h-4 w-4" />
-          </Button>
-          
-          {/* Order Total Summary Panel */}
-          <div className="flex items-center gap-3 px-3 h-9 bg-background rounded-md border border-input">
-            <div className="flex items-center gap-1">
-              <span className="text-xs text-muted-foreground">{t("artikel", lang)}</span>
-              <span className="text-sm font-semibold">{filledRowsCount}</span>
-            </div>
-            <div className="w-px h-5 bg-input" />
-            <div className="flex items-center gap-1">
-              <span className="text-xs text-muted-foreground">{t("bestellwert", lang)}</span>
-              <span className="text-sm font-bold text-primary">
-                {orderTotal.toLocaleString("de-DE", { style: "currency", currency: "EUR" })}
-              </span>
-            </div>
-            <div className="w-px h-5 bg-input" />
-            <div className="flex items-center gap-1">
-              <Label htmlFor="discount" className="text-xs text-muted-foreground whitespace-nowrap">{t("rabatt", lang)}</Label>
-              <Input
-                id="discount"
-                type="text"
-                inputMode="decimal"
-                value={discount}
-                onChange={handleDiscountChange}
-                placeholder="0"
-                className="h-6 w-14 px-1.5 text-sm text-center"
-              />
-            </div>
+
+          <div className="w-px h-5 bg-border" />
+
+          {/* ── Order summary ── */}
+          <div className="flex items-center gap-2.5 px-3 h-8 bg-background rounded-md border border-input text-xs">
+            <span className="text-muted-foreground">{t("artikel", lang)}</span>
+            <span className="font-semibold">{filledRowsCount}</span>
+            <div className="w-px h-4 bg-border" />
+            <span className="text-muted-foreground">{t("bestellwert", lang)}</span>
+            <span className="font-bold text-primary">
+              {orderTotal.toLocaleString("de-DE", { style: "currency", currency: "EUR" })}
+            </span>
+            <div className="w-px h-4 bg-border" />
+            <span className="text-muted-foreground whitespace-nowrap">{t("rabatt", lang)}</span>
+            <Input
+              id="discount"
+              type="text"
+              inputMode="decimal"
+              value={discount}
+              onChange={handleDiscountChange}
+              placeholder="0"
+              className="h-5 w-12 px-1 text-xs text-center"
+            />
             {parseFloat(discount.replace(",", ".")) > 0 && (
               <>
-                <div className="w-px h-5 bg-input" />
-                <div className="flex items-center gap-1">
-                  <span className="text-xs text-muted-foreground">{t("netto", lang)}</span>
-                  <span className="text-sm font-bold text-accent-foreground">
-                    {discountedTotal.toLocaleString("de-DE", { style: "currency", currency: "EUR" })}
-                  </span>
-                </div>
+                <div className="w-px h-4 bg-border" />
+                <span className="text-muted-foreground">{t("netto", lang)}</span>
+                <span className="font-bold">
+                  {discountedTotal.toLocaleString("de-DE", { style: "currency", currency: "EUR" })}
+                </span>
               </>
             )}
           </div>
-          <Button onClick={handlePaste} variant="outline" className="gap-2">
-            <ClipboardPaste className="h-4 w-4" />
+
+          <div className="w-px h-5 bg-border" />
+
+          {/* ── Paste ── */}
+          <Button onClick={handlePaste} variant="outline" size="sm" className="gap-1.5">
+            <ClipboardPaste className="h-3.5 w-3.5" />
             {t("csvPaste", lang)}
           </Button>
 
-          <div className="flex items-center gap-1.5 px-2">
-            <Switch id="textGenerating" checked={textGenerating} onCheckedChange={setTextGenerating} />
-            <Label htmlFor="textGenerating" className="text-xs font-normal cursor-pointer">
-              {lang === "DE" ? "Text Generierung" : "Text Generating"}
+          <div className="w-px h-5 bg-border" />
+
+          {/* ── Text generation ── */}
+          <div className="flex items-center gap-1.5">
+            <Switch id="textGenerating" checked={textGenerating} onCheckedChange={setTextGenerating} className="scale-90" />
+            <Label htmlFor="textGenerating" className="text-xs font-normal cursor-pointer whitespace-nowrap">
+              {lang === "DE" ? "Text Generierung" : "Text Gen."}
             </Label>
           </div>
           {textGenerating && (
-            <Button variant="outline" className="gap-2" onClick={handleGenerateTexts} disabled={isGeneratingTexts}>
-              {isGeneratingTexts ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={handleGenerateTexts} disabled={isGeneratingTexts}>
+              {isGeneratingTexts ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
               {isGeneratingTexts ? (lang === "DE" ? "Generiere..." : "Generating...") : (lang === "DE" ? "Generieren" : "Generate")}
             </Button>
           )}
-          <Button onClick={processAndDownload} className="gap-2" disabled={isGeneratingTexts}>
-            {isGeneratingTexts ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-            {isGeneratingTexts ? (lang === "DE" ? "Generiere Texte..." : "Generating texts...") : t("csvExport", lang)}
+
+          {/* ── Primary export ── */}
+          <Button onClick={processAndDownload} size="sm" className="gap-1.5" disabled={isGeneratingTexts}>
+            {isGeneratingTexts ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+            {isGeneratingTexts ? (lang === "DE" ? "Generiere..." : "Generating...") : t("csvExport", lang)}
           </Button>
 
-          <Button variant="outline" className="gap-2" onClick={handleCategoryMapping} disabled={isMapping}>
-            {isMapping ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderTree className="h-4 w-4" />}
-            {isMapping ? (lang === "DE" ? "Klassifiziere..." : "Mapping...") : (lang === "DE" ? "Kategorien" : "Categories")}
+          <div className="w-px h-5 bg-border" />
+
+          {/* ── AI tools ── */}
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={handleCategoryMapping} disabled={isMapping}>
+            {isMapping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FolderTree className="h-3.5 w-3.5" />}
+            {isMapping ? (lang === "DE" ? "Lädt..." : "Loading...") : (lang === "DE" ? "Kategorien" : "Categories")}
           </Button>
 
-          <Button
-            onClick={handleAIClassify}
-            variant="outline"
-            className="gap-2"
-            disabled={isClassifying}
-          >
-            {isClassifying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={handleAIClassify} disabled={isClassifying}>
+            {isClassifying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
             {isClassifying ? t("aiClassifying", lang) : t("aiClassify", lang)}
           </Button>
         </div>
