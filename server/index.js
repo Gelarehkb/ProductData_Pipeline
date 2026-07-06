@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import generateSimple from './routes/generate-simple.js';
 import generateComplex from './routes/generate-complex.js';
+import mapCategories from './routes/map-categories.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isProd = process.env.NODE_ENV === 'production';
@@ -249,6 +250,7 @@ app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
 app.use('/api/generate-online-texts-simple', generateSimple);
 app.use('/api/generate-online-texts-complex', generateComplex);
+app.use('/api/map-categories', mapCategories);
 
 // Serve built frontend in production
 if (isProd) {

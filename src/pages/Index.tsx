@@ -6,7 +6,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Switch } from "@/components/ui/switch";
-import { Download, Trash2, ClipboardPaste, Undo2, Sparkles, Loader2, Globe, Plus, Upload } from "lucide-react";
+import { Download, Trash2, ClipboardPaste, Undo2, Sparkles, Loader2, Globe, Plus, Upload, FolderTree } from "lucide-react";
 import { MerkmaleMultiSelect } from "@/components/MerkmaleMultiSelect";
 import { useToast } from "@/hooks/use-toast";
 import { FindReplaceDialog } from "@/components/FindReplaceDialog";
@@ -592,6 +592,7 @@ const Index = () => {
   const [findReplaceOpen, setFindReplaceOpen] = useState(false);
   const [isClassifying, setIsClassifying] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
+  const [isMapping, setIsMapping] = useState(false);
 
   const handleAIClassify = async () => {
     const filledRows = rows.filter(r => getClothName(r).trim() !== "");
@@ -1760,6 +1761,115 @@ const Index = () => {
     }
   };
 
+  const handleCategoryMapping = async () => {
+    // Group rows by unique product (name + color), same as processAndDownload
+    const groups: Record<string, ClothRow[]> = {};
+    rows.forEach(row => {
+      const name = getClothName(row).trim();
+      if (!name) return;
+      const key = `${name}|${(row.color || "").trim()}`;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(row);
+    });
+
+    const productKeys = Object.keys(groups);
+    if (productKeys.length === 0) {
+      toast({ title: t("noData", lang), description: t("noDataDesc", lang), variant: "destructive" });
+      return;
+    }
+
+    setIsMapping(true);
+    try {
+      // Build items list for AI
+      const items = productKeys.map(key => {
+        const [name, color] = key.split("|");
+        const groupRows = groups[key];
+        const first = groupRows[0];
+        const wg = first.WarenGruppe || "";
+        const artikelnummer = artikelnummerBuilder(kurzl, name, color, "", wg, aufSe);
+        return {
+          artikelnummer,
+          artikelname: name,
+          farbe: color,
+          hersteller: hersteller.trim(),
+          warengruppe: wg,
+          art: first.MerkmaleArt || "",
+          beschreibung: first.Description || "",
+        };
+      });
+
+      const res = await fetch("/api/map-categories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || res.statusText);
+
+      const results: { artikelnummer: string; categoryPath: string }[] = data.results;
+
+      // Build JTL category CSV rows
+      // Each product gets one row per hierarchy level:
+      // artikelnummer;Level1;Level2;Level3
+      const csvRows: string[][] = [];
+      let maxDepth = 0;
+
+      results.forEach((r, idx) => {
+        const an = r.artikelnummer || items[idx]?.artikelnummer || "";
+        const path = (r.categoryPath || "").trim();
+        if (!path) return;
+        const parts = path.split(" -> ").map(p => p.trim()).filter(Boolean);
+        maxDepth = Math.max(maxDepth, parts.length);
+        // One row per hierarchy level (cumulative)
+        for (let depth = 1; depth <= parts.length; depth++) {
+          csvRows.push([an, ...parts.slice(0, depth)]);
+        }
+      });
+
+      if (csvRows.length === 0) {
+        toast({ title: lang === "DE" ? "Keine Kategorien" : "No categories", variant: "destructive" });
+        return;
+      }
+
+      // Pad all rows to maxDepth + 1 columns (artikelnummer + maxDepth cat columns)
+      const totalCols = 1 + maxDepth;
+      const headers = ["Artikelnummer", ...Array.from({ length: maxDepth }, (_, i) => `cat${i + 1}`)];
+      const escSemi = (v: string) => (v.includes(";") || v.includes('"') ? `"${v.replace(/"/g, '""')}"` : v);
+
+      const lines = [
+        headers.map(escSemi).join(";"),
+        ...csvRows.map(row => {
+          const padded = [...row];
+          while (padded.length < totalCols) padded.push("");
+          return padded.map(escSemi).join(";");
+        }),
+      ];
+
+      const today = new Date();
+      const dateStr = `${String(today.getDate()).padStart(2, "0")}${String(today.getMonth() + 1).padStart(2, "0")}${today.getFullYear()}`;
+      const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${kurzl || "export"}_kategorien_${dateStr}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      toast({
+        title: lang === "DE" ? "Kategorien exportiert" : "Categories exported",
+        description: `${results.length} ${lang === "DE" ? "Produkte klassifiziert" : "products classified"}`,
+      });
+    } catch (err) {
+      toast({
+        title: lang === "DE" ? "Fehler" : "Error",
+        description: err instanceof Error ? err.message : String(err),
+        variant: "destructive",
+      });
+    } finally {
+      setIsMapping(false);
+    }
+  };
+
   const processAndDownload = async (textsOverride?: typeof confirmedTexts) => {
     const AufAB = parseInt(ab) || 1;
     const AufAuf = parseInt(auf) || 2;
@@ -2371,6 +2481,11 @@ const Index = () => {
           <Button onClick={processAndDownload} className="gap-2" disabled={isGeneratingTexts}>
             {isGeneratingTexts ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             {isGeneratingTexts ? (lang === "DE" ? "Generiere Texte..." : "Generating texts...") : t("csvExport", lang)}
+          </Button>
+
+          <Button variant="outline" className="gap-2" onClick={handleCategoryMapping} disabled={isMapping}>
+            {isMapping ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderTree className="h-4 w-4" />}
+            {isMapping ? (lang === "DE" ? "Klassifiziere..." : "Mapping...") : (lang === "DE" ? "Kategorien" : "Categories")}
           </Button>
 
           <Button
