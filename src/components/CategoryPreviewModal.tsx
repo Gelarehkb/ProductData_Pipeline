@@ -117,9 +117,9 @@ function PickerContent({ currentPaths, onApply, onClose }: PickerContentProps) {
   }, []);
 
   return (
-    <div className="flex flex-col" style={{ width: 320, maxHeight: 460 }}>
+    <div className="flex flex-col h-full">
       {/* Search */}
-      <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-border">
+      <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-border shrink-0">
         <Search className="h-3.5 w-3.5 text-muted-foreground flex-none" />
         <Input
           autoFocus
@@ -130,8 +130,8 @@ function PickerContent({ currentPaths, onApply, onClose }: PickerContentProps) {
         />
       </div>
 
-      {/* Tree */}
-      <div className="flex-1 overflow-y-auto p-1 min-h-0" style={{ maxHeight: 340 }}>
+      {/* Tree — fills all remaining space and scrolls */}
+      <div className="flex-1 overflow-y-auto overflow-x-hidden p-1">
         {CATEGORY_TREE.map(node => (
           <TreeNode
             key={node.name}
@@ -146,7 +146,7 @@ function PickerContent({ currentPaths, onApply, onClose }: PickerContentProps) {
       </div>
 
       {/* Footer */}
-      <div className="flex items-center justify-between gap-2 px-2 py-1.5 border-t border-border">
+      <div className="flex items-center justify-between gap-2 px-2 py-1.5 border-t border-border shrink-0">
         <span className="text-xs text-muted-foreground">{selected.size} gewählt</span>
         <div className="flex gap-1.5">
           <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={onClose}>Abbrechen</Button>
@@ -370,12 +370,13 @@ export const CategoryPreviewModal = ({ open, onOpenChange, initialRows, onConfir
                             </button>
                           </PopoverTrigger>
                           <PopoverContent
-                            className="p-0 overflow-hidden"
-                            style={{ width: 320 }}
+                            className="p-0 flex flex-col"
+                            style={{ width: 380, height: "min(560px, 70vh)" }}
                             align="start"
                             side="bottom"
                             sideOffset={6}
-                            // keep Dialog open when clicking inside picker
+                            collisionPadding={16}
+                            avoidCollisions={true}
                             onInteractOutside={e => e.preventDefault()}
                           >
                             <PickerContent
