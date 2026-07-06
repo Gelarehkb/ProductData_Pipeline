@@ -6,7 +6,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Switch } from "@/components/ui/switch";
-import { Download, Trash2, ClipboardPaste, Undo2, Sparkles, Loader2, Globe, Plus, Upload, FolderTree } from "lucide-react";
+import { Download, Trash2, ClipboardPaste, Undo2, Sparkles, Loader2, Globe, Plus, Upload, FolderTree, Eye } from "lucide-react";
 import { MerkmaleMultiSelect } from "@/components/MerkmaleMultiSelect";
 import { useToast } from "@/hooks/use-toast";
 import { FindReplaceDialog } from "@/components/FindReplaceDialog";
@@ -509,7 +509,6 @@ const Index = () => {
   const [isGeneratingTexts, setIsGeneratingTexts] = useState(false);
   const [textGenerating, setTextGenerating] = useState(false);
   const [kategorienToggle, setKategorienToggle] = useState(false);
-  const pendingExportTextsRef = useRef<typeof confirmedTexts | undefined>(undefined);
   const [textPreviewOpen, setTextPreviewOpen] = useState(false);
   const [textPreviewRows, setTextPreviewRows] = useState<TextPreviewRow[]>([]);
   const [confirmedTexts, setConfirmedTexts] = useState<Record<string, { produkttext: string; Title_Tag: string; html_de: string; meta_description: string; suchbegriffe: string }>>({});
@@ -1985,20 +1984,12 @@ const Index = () => {
   };
 
   const handleCategoryConfirm = (confirmedRows: CategoryPreviewRow[]) => {
-    // Save confirmed category paths back by product name for future reuse
     const updated: Record<string, string> = { ...confirmedCategories };
-    const categoriesMap: Record<string, string> = {};
     confirmedRows.forEach(r => {
       const name = categoryArtikelToName[r.artikelnummer];
-      if (name) {
-        updated[name] = r.categoryPath;
-        categoriesMap[name] = r.categoryPath;
-      }
+      if (name) updated[name] = r.categoryPath;
     });
     setConfirmedCategories(updated);
-    // Export the main CSV with category columns filled
-    processAndDownload(pendingExportTextsRef.current, categoriesMap);
-    pendingExportTextsRef.current = undefined;
   };
 
   const processAndDownload = async (textsOverride?: typeof confirmedTexts, categoriesOverride?: Record<string, string>) => {
@@ -2017,7 +2008,7 @@ const Index = () => {
     });
 
     const textsByName = textsOverride ?? confirmedTexts;
-    const catsByName = categoriesOverride ?? {};
+    const catsByName = categoriesOverride ?? (kategorienToggle ? confirmedCategories : {});
 
     const outputRows: Record<string, string | number>[] = [];
 
@@ -2606,42 +2597,64 @@ const Index = () => {
 
           <div className="w-px h-5 bg-border" />
 
-          {/* ── Text generation ── */}
-          <div className="flex items-center gap-1.5">
-            <Switch id="textGenerating" checked={textGenerating} onCheckedChange={setTextGenerating} className="scale-90" />
+          {/* ── Text generation toggle ── */}
+          <div className="flex items-center gap-1">
+            <Switch
+              id="textGenerating"
+              checked={textGenerating}
+              onCheckedChange={(v) => {
+                setTextGenerating(v);
+                if (v) handleGenerateTexts();
+              }}
+              className="scale-90"
+            />
             <Label htmlFor="textGenerating" className="text-xs font-normal cursor-pointer whitespace-nowrap">
-              {lang === "DE" ? "Text Generierung" : "Text Gen."}
+              {lang === "DE" ? "Texte" : "Texts"}
             </Label>
+            {textGenerating && textPreviewRows.length > 0 && (
+              <Button
+                variant="ghost" size="sm"
+                className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                onClick={() => setTextPreviewOpen(true)}
+                title={lang === "DE" ? "Textvorschau öffnen" : "Open text preview"}
+                disabled={isGeneratingTexts}
+              >
+                {isGeneratingTexts ? <Loader2 className="h-3 w-3 animate-spin" /> : <Eye className="h-3 w-3" />}
+              </Button>
+            )}
           </div>
-          {textGenerating && (
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={handleGenerateTexts} disabled={isGeneratingTexts}>
-              {isGeneratingTexts ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-              {isGeneratingTexts ? (lang === "DE" ? "Generiere..." : "Generating...") : (lang === "DE" ? "Generieren" : "Generate")}
-            </Button>
-          )}
 
           {/* ── Kategorien toggle ── */}
-          <div className="flex items-center gap-1.5">
-            <Switch id="kategorienToggle" checked={kategorienToggle} onCheckedChange={setKategorienToggle} className="scale-90" />
+          <div className="flex items-center gap-1">
+            <Switch
+              id="kategorienToggle"
+              checked={kategorienToggle}
+              onCheckedChange={(v) => {
+                setKategorienToggle(v);
+                if (v) handleCategoryMapping();
+              }}
+              className="scale-90"
+            />
             <Label htmlFor="kategorienToggle" className="text-xs font-normal cursor-pointer whitespace-nowrap">
               {lang === "DE" ? "Kategorien" : "Categories"}
             </Label>
+            {kategorienToggle && categoryPreviewRows.length > 0 && (
+              <Button
+                variant="ghost" size="sm"
+                className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                onClick={() => setCategoryPreviewOpen(true)}
+                title={lang === "DE" ? "Kategorienvorschau öffnen" : "Open category preview"}
+                disabled={isMapping}
+              >
+                {isMapping ? <Loader2 className="h-3 w-3 animate-spin" /> : <Eye className="h-3 w-3" />}
+              </Button>
+            )}
           </div>
 
           {/* ── Primary export ── */}
-          <Button
-            onClick={() => {
-              if (kategorienToggle) {
-                pendingExportTextsRef.current = undefined;
-                handleCategoryMapping();
-              } else {
-                processAndDownload();
-              }
-            }}
-            size="sm" className="gap-1.5" disabled={isGeneratingTexts || isMapping}
-          >
-            {isMapping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-            {isMapping ? (lang === "DE" ? "Klassifiziere..." : "Classifying...") : t("csvExport", lang)}
+          <Button onClick={() => processAndDownload()} size="sm" className="gap-1.5" disabled={isGeneratingTexts || isMapping}>
+            <Download className="h-3.5 w-3.5" />
+            {t("csvExport", lang)}
           </Button>
 
           <div className="w-px h-5 bg-border" />
@@ -2665,12 +2678,6 @@ const Index = () => {
             map[r.name] = { produkttext: r.produkttext, Title_Tag: r.Title_Tag, html_de: r.html_de, meta_description: r.meta_description, suchbegriffe: r.suchbegriffe };
           });
           setConfirmedTexts(map);
-          if (kategorienToggle) {
-            pendingExportTextsRef.current = map;
-            handleCategoryMapping();
-          } else {
-            processAndDownload(map);
-          }
         }}
       />
       <CategoryPreviewModal
