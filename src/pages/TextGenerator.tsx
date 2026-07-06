@@ -54,38 +54,45 @@ interface FillDrag {
 }
 
 // ---------------------------------------------------------------------------
-// Constants
+// Column definitions
 // ---------------------------------------------------------------------------
-const COLUMNS: { key: TextRowKey; labelDE: string; labelEN: string; width: number; isOutput: boolean; multiline: boolean }[] = [
-  { key: "han",              labelDE: "HAN / Barcode",        labelEN: "HAN / Barcode",       width: 160, isOutput: false, multiline: false },
-  { key: "artikelnummer",    labelDE: "Artikelnummer",         labelEN: "Article No.",          width: 160, isOutput: false, multiline: false },
-  { key: "artikelname",      labelDE: "Artikelname",           labelEN: "Item Name",            width: 200, isOutput: false, multiline: false },
-  { key: "beschreibung",     labelDE: "Beschreibung",          labelEN: "Description",          width: 280, isOutput: false, multiline: true  },
-  { key: "produkttext",      labelDE: "Produkttext",           labelEN: "Product Text",         width: 280, isOutput: true,  multiline: true  },
-  { key: "Title_Tag",        labelDE: "Title Tag",             labelEN: "Title Tag",            width: 200, isOutput: true,  multiline: false },
-  { key: "html_de",          labelDE: "HTML (DE)",             labelEN: "HTML (DE)",            width: 300, isOutput: true,  multiline: true  },
-  { key: "meta_description", labelDE: "Meta Description",     labelEN: "Meta Description",     width: 220, isOutput: true,  multiline: true  },
-  { key: "suchbegriffe",     labelDE: "Suchbegriffe",          labelEN: "Search Terms",         width: 180, isOutput: true,  multiline: false },
+const COLUMNS: {
+  key: TextRowKey;
+  labelDE: string;
+  labelEN: string;
+  width: number;
+  isOutput: boolean;
+}[] = [
+  { key: "han",              labelDE: "HAN / Barcode",    labelEN: "HAN / Barcode",   width: 160, isOutput: false },
+  { key: "artikelnummer",    labelDE: "Artikelnummer",     labelEN: "Article No.",      width: 160, isOutput: false },
+  { key: "artikelname",      labelDE: "Artikelname",       labelEN: "Item Name",        width: 200, isOutput: false },
+  { key: "beschreibung",     labelDE: "Beschreibung",      labelEN: "Description",      width: 260, isOutput: false },
+  { key: "produkttext",      labelDE: "Produkttext",       labelEN: "Product Text",     width: 260, isOutput: true  },
+  { key: "Title_Tag",        labelDE: "Title Tag",         labelEN: "Title Tag",        width: 200, isOutput: true  },
+  { key: "html_de",          labelDE: "HTML (DE)",         labelEN: "HTML (DE)",        width: 280, isOutput: true  },
+  { key: "meta_description", labelDE: "Meta Description",  labelEN: "Meta Description", width: 220, isOutput: true  },
+  { key: "suchbegriffe",     labelDE: "Suchbegriffe",      labelEN: "Search Terms",     width: 180, isOutput: true  },
 ];
-
-const INPUT_COLUMNS = COLUMNS.filter(c => !c.isOutput);
-const OUTPUT_COLUMNS = COLUMNS.filter(c => c.isOutput);
 
 const createEmptyRow = (): TextRow => ({
   id: crypto.randomUUID(),
-  han: "",
-  artikelnummer: "",
-  artikelname: "",
-  beschreibung: "",
-  produkttext: "",
-  Title_Tag: "",
-  html_de: "",
-  meta_description: "",
-  suchbegriffe: "",
+  han: "", artikelnummer: "", artikelname: "", beschreibung: "",
+  produkttext: "", Title_Tag: "", html_de: "", meta_description: "", suchbegriffe: "",
 });
 
 // ---------------------------------------------------------------------------
-// Paste parser (same logic as Index.tsx)
+// Selection range helper
+// ---------------------------------------------------------------------------
+function getSelectionRange(start: CellPos, end: CellPos): CellPos[] {
+  const r0 = Math.min(start.row, end.row), r1 = Math.max(start.row, end.row);
+  const c0 = Math.min(start.col, end.col), c1 = Math.max(start.col, end.col);
+  const out: CellPos[] = [];
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) out.push({ row: r, col: c });
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// RFC4180-aware paste parser (same logic as Index.tsx)
 // ---------------------------------------------------------------------------
 function parsePasteMatrix(text: string): string[][] {
   const parse = (raw: string, delim: string): string[][] => {
@@ -135,81 +142,310 @@ export default function TextGenerator() {
   const [history, setHistory] = useState<TextRow[][]>([]);
   const [generating, setGenerating] = useState(false);
 
-  // Selection: list of {row, col} positions
+  // Selection
   const [selection, setSelection] = useState<CellPos[]>([]);
-  const [editingCell, setEditingCell] = useState<CellPos | null>(null);
-  const [editValue, setEditValue] = useState("");
+  const [selectionStart, setSelectionStart] = useState<CellPos | null>(null);
+  const [isSelecting, setIsSelecting] = useState(false);
 
+  // Fill handle
   const [fillHandleDrag, setFillHandleDrag] = useState<FillDrag | null>(null);
 
-  const lastClickedRef = useRef<CellPos | null>(null);
-  const editInputRef = useRef<HTMLTextAreaElement | HTMLInputElement | null>(null);
+  // Undo debounce: only save history when moving to a new cell
+  const lastEditedCellRef = useRef<{ id: string; field: string } | null>(null);
 
-  // Sync row count
-  const parsedRowCount = Math.max(1, Math.min(200, parseInt(rowCountInput, 10) || 10));
-
+  // ---------------------------------------------------------------------------
+  // Row helpers
+  // ---------------------------------------------------------------------------
   const applyRowCount = useCallback((count: number) => {
     setRows(prev => {
       if (prev.length === count) return prev;
-      if (prev.length < count) {
-        return [...prev, ...Array.from({ length: count - prev.length }, createEmptyRow)];
-      }
+      if (prev.length < count) return [...prev, ...Array.from({ length: count - prev.length }, createEmptyRow)];
       return prev.slice(0, count);
     });
   }, []);
 
+  const applyRowCountInput = () => {
+    const n = Math.max(1, Math.min(200, parseInt(rowCountInput, 10) || rows.length));
+    setRowCountInput(String(n));
+    applyRowCount(n);
+  };
+
   // ---------------------------------------------------------------------------
-  // Selection helpers
+  // Cell change with undo debounce
+  // ---------------------------------------------------------------------------
+  const handleCellChange = useCallback((id: string, field: TextRowKey, value: string) => {
+    const cellKey = `${id}:${field}`;
+    if (lastEditedCellRef.current?.id !== id || lastEditedCellRef.current?.field !== field) {
+      setHistory(prev => [...prev.slice(-49), rows]);
+      lastEditedCellRef.current = { id, field };
+    }
+    setRows(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
+  }, [rows]);
+
+  // ---------------------------------------------------------------------------
+  // Selection
   // ---------------------------------------------------------------------------
   const isCellSelected = (row: number, col: number) =>
     selection.some(s => s.row === row && s.col === col);
 
   const handleCellMouseDown = (e: React.MouseEvent, row: number, col: number) => {
-    if (editingCell && (editingCell.row !== row || editingCell.col !== col)) {
-      commitEdit();
-    }
-
-    if (e.shiftKey && lastClickedRef.current) {
-      // Range selection
-      const r0 = Math.min(lastClickedRef.current.row, row);
-      const r1 = Math.max(lastClickedRef.current.row, row);
-      const c0 = Math.min(lastClickedRef.current.col, col);
-      const c1 = Math.max(lastClickedRef.current.col, col);
-      const range: CellPos[] = [];
-      for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) range.push({ row: r, col: c });
-      setSelection(range);
+    if (e.shiftKey && selectionStart) {
+      setSelection(getSelectionRange(selectionStart, { row, col }));
+    } else if (e.ctrlKey || e.metaKey) {
+      const exists = selection.some(s => s.row === row && s.col === col);
+      if (exists) setSelection(prev => prev.filter(s => !(s.row === row && s.col === col)));
+      else { setSelection(prev => [...prev, { row, col }]); setSelectionStart({ row, col }); }
     } else {
       setSelection([{ row, col }]);
-      lastClickedRef.current = { row, col };
+      setSelectionStart({ row, col });
+      setIsSelecting(true);
     }
   };
 
-  const handleCellDoubleClick = (row: number, col: number) => {
-    startEdit(row, col);
+  const handleCellMouseEnter = (row: number, col: number) => {
+    if (isSelecting && selectionStart) {
+      setSelection(getSelectionRange(selectionStart, { row, col }));
+    }
+    if (fillHandleDrag && col === fillHandleDrag.sourceCol) {
+      setFillHandleDrag(prev => prev ? { ...prev, targetRow: row } : null);
+    }
   };
 
-  const startEdit = (row: number, col: number) => {
-    const val = rows[row]?.[COLUMNS[col].key] ?? "";
-    setEditingCell({ row, col });
-    setEditValue(val);
-    setSelection([{ row, col }]);
+  const handleRowSelect = (rowIndex: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const cells: CellPos[] = COLUMNS.map((_, c) => ({ row: rowIndex, col: c }));
+    if (e.shiftKey && selectionStart) {
+      const minR = Math.min(selectionStart.row, rowIndex);
+      const maxR = Math.max(selectionStart.row, rowIndex);
+      const all: CellPos[] = [];
+      for (let r = minR; r <= maxR; r++) COLUMNS.forEach((_, c) => all.push({ row: r, col: c }));
+      setSelection(all);
+    } else {
+      setSelection(cells);
+      setSelectionStart({ row: rowIndex, col: 0 });
+    }
   };
 
-  const commitEdit = useCallback(() => {
-    if (!editingCell) return;
-    const { row, col } = editingCell;
-    const key = COLUMNS[col].key;
+  // ---------------------------------------------------------------------------
+  // Keyboard navigation (same as Index.tsx)
+  // ---------------------------------------------------------------------------
+  const handleKeyNavigation = useCallback((e: React.KeyboardEvent, rowIndex: number, colIndex: number) => {
+    const { key } = e;
+    let newRow = rowIndex, newCol = colIndex;
+
+    if (key === "ArrowUp") {
+      e.preventDefault();
+      newRow = Math.max(0, rowIndex - 1);
+    } else if (key === "ArrowDown") {
+      e.preventDefault();
+      newRow = Math.min(rows.length - 1, rowIndex + 1);
+    } else if (key === "ArrowLeft" && (e.target as HTMLInputElement).selectionStart === 0) {
+      e.preventDefault();
+      newCol = Math.max(0, colIndex - 1);
+    } else if (key === "ArrowRight") {
+      const inp = e.target as HTMLInputElement;
+      if (inp.selectionStart === inp.value?.length) {
+        e.preventDefault();
+        newCol = Math.min(COLUMNS.length - 1, colIndex + 1);
+      }
+    } else if (key === "Tab") {
+      e.preventDefault();
+      if (e.shiftKey) {
+        if (colIndex > 0) newCol = colIndex - 1;
+        else if (rowIndex > 0) { newRow = rowIndex - 1; newCol = COLUMNS.length - 1; }
+      } else {
+        if (colIndex < COLUMNS.length - 1) newCol = colIndex + 1;
+        else { newRow = Math.min(rows.length - 1, rowIndex + 1); newCol = 0; }
+      }
+    } else if (key === "Enter") {
+      e.preventDefault();
+      newRow = Math.min(rows.length - 1, rowIndex + 1);
+    } else {
+      return;
+    }
+
+    if (newRow !== rowIndex || newCol !== colIndex) {
+      const el = document.querySelector(`[data-row="${newRow}"][data-col="${newCol}"]`) as HTMLElement | null;
+      el?.focus();
+    }
+  }, [rows.length]);
+
+  // ---------------------------------------------------------------------------
+  // Paste — per-cell onPaste handler
+  // ---------------------------------------------------------------------------
+  const handleCellPaste = (
+    e: React.ClipboardEvent<HTMLInputElement>,
+    rowIndex: number,
+    colIndex: number,
+    field: TextRowKey,
+  ) => {
+    const text = e.clipboardData.getData("text");
+    if (!text) return;
+
+    const hasTab       = text.includes("\t");
+    const hasSemicolon = text.includes(";");
+    const hasNewline   = /\r?\n/.test(text.trim());
+
+    // Free-text fields paste as single cell (no column delimiter or tabs)
+    if ((field === "beschreibung" || field === "html_de" || field === "produkttext" || field === "meta_description") && !hasTab && !hasSemicolon) {
+      e.preventDefault();
+      handleCellChange(rows[rowIndex].id, field, text.trimEnd());
+      return;
+    }
+
+    // Single value no structure → native
+    if (!hasTab && !hasSemicolon && !hasNewline) return;
+
+    const matrix = parsePasteMatrix(text);
+    if (matrix.length === 0) return;
+    const maxCols = Math.max(1, ...matrix.map(r => r.length));
+    if (matrix.length === 1 && maxCols === 1) return;
+
+    e.preventDefault();
+    setHistory(prev => [...prev.slice(-49), rows]);
+    lastEditedCellRef.current = null;
     setRows(prev => {
       const next = [...prev];
-      next[row] = { ...next[row], [key]: editValue };
+      matrix.forEach((cells, i) => {
+        const targetRow = rowIndex + i;
+        while (targetRow >= next.length) next.push(createEmptyRow());
+        const updated = { ...next[targetRow] };
+        cells.forEach((val, j) => {
+          const targetCol = colIndex + j;
+          if (targetCol < COLUMNS.length) {
+            (updated as any)[COLUMNS[targetCol].key] = val.trim();
+          }
+        });
+        next[targetRow] = updated;
+      });
       return next;
     });
-    setEditingCell(null);
-  }, [editingCell, editValue]);
+    toast({ title: lang === "DE" ? "Daten eingefügt" : "Data pasted", description: `${matrix.length} × ${maxCols}` });
+  };
 
-  const cancelEdit = useCallback(() => {
-    setEditingCell(null);
-  }, []);
+  // ---------------------------------------------------------------------------
+  // Copy / Paste selection (Ctrl+C / Ctrl+V on selected cells)
+  // ---------------------------------------------------------------------------
+  const handleCopySelection = useCallback(async () => {
+    if (selection.length === 0) return;
+    const minRow = Math.min(...selection.map(s => s.row));
+    const maxRow = Math.max(...selection.map(s => s.row));
+    const minCol = Math.min(...selection.map(s => s.col));
+    const maxCol = Math.max(...selection.map(s => s.col));
+    const lines: string[] = [];
+    for (let r = minRow; r <= maxRow; r++) {
+      const cells: string[] = [];
+      for (let c = minCol; c <= maxCol; c++) cells.push(rows[r]?.[COLUMNS[c].key] || "");
+      lines.push(cells.join("\t"));
+    }
+    await navigator.clipboard.writeText(lines.join("\n"));
+    toast({ title: lang === "DE" ? "Kopiert" : "Copied", description: `${selection.length} ${lang === "DE" ? "Zellen" : "cells"}` });
+  }, [selection, rows, lang, toast]);
+
+  const handlePasteSelection = useCallback(async () => {
+    if (selection.length === 0) return;
+    try {
+      const text = await navigator.clipboard.readText();
+      const minRow = Math.min(...selection.map(s => s.row));
+      const minCol = Math.min(...selection.map(s => s.col));
+      const targetField = COLUMNS[minCol].key;
+
+      const hasTab       = text.includes("\t");
+      const hasSemicolon = text.includes(";");
+
+      if ((targetField === "beschreibung" || targetField === "html_de" || targetField === "produkttext" || targetField === "meta_description") && !hasTab && !hasSemicolon) {
+        setHistory(prev => [...prev.slice(-49), rows]);
+        setRows(prev => { const n = [...prev]; n[minRow] = { ...n[minRow], [targetField]: text.trimEnd() }; return n; });
+        toast({ title: lang === "DE" ? "Eingefügt" : "Pasted" });
+        return;
+      }
+
+      const matrix = parsePasteMatrix(text);
+      if (matrix.length === 0) return;
+      setHistory(prev => [...prev.slice(-49), rows]);
+      lastEditedCellRef.current = null;
+      setRows(prev => {
+        const next = [...prev];
+        matrix.forEach((cells, i) => {
+          const targetRow = minRow + i;
+          while (targetRow >= next.length) next.push(createEmptyRow());
+          const updated = { ...next[targetRow] };
+          cells.forEach((val, j) => {
+            const targetCol = minCol + j;
+            if (targetCol < COLUMNS.length) (updated as any)[COLUMNS[targetCol].key] = val.trim();
+          });
+          next[targetRow] = updated;
+        });
+        return next;
+      });
+      toast({ title: lang === "DE" ? "Eingefügt" : "Pasted", description: `${matrix.length} ${lang === "DE" ? "Zeilen" : "rows"}` });
+    } catch {
+      toast({ title: lang === "DE" ? "Fehler" : "Error", description: lang === "DE" ? "Kein Zugriff auf Zwischenablage." : "No clipboard access.", variant: "destructive" });
+    }
+  }, [selection, rows, lang, toast]);
+
+  const handleDeleteSelection = useCallback(() => {
+    if (selection.length === 0) return;
+    setHistory(prev => [...prev.slice(-49), rows]);
+    setRows(prev => {
+      const next = [...prev];
+      for (const { row, col } of selection) {
+        next[row] = { ...next[row], [COLUMNS[col].key]: "" };
+      }
+      return next;
+    });
+  }, [selection, rows]);
+
+  // ---------------------------------------------------------------------------
+  // Global keyboard shortcuts
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      const isTableInput = (target.tagName === "INPUT" || target.tagName === "TEXTAREA") && target.closest("table");
+      const isMac = navigator.platform.toUpperCase().includes("MAC");
+      const ctrl = isMac ? e.metaKey : e.ctrlKey;
+
+      if (ctrl && e.key === "c") {
+        if (isTableInput) return;
+        if (selection.length > 0) { e.preventDefault(); handleCopySelection(); }
+      } else if (ctrl && e.key === "v") {
+        if (isTableInput) return;
+        e.preventDefault();
+        if (selection.length > 0) handlePasteSelection();
+      } else if (ctrl && e.key === "z") {
+        e.preventDefault();
+        setHistory(prev => {
+          if (prev.length === 0) return prev;
+          setRows(prev[prev.length - 1]);
+          lastEditedCellRef.current = null;
+          toast({ title: lang === "DE" ? "Rückgängig" : "Undo" });
+          return prev.slice(0, -1);
+        });
+      } else if ((e.key === "Delete" || e.key === "Backspace") && !isTableInput) {
+        if (selection.length > 0) { e.preventDefault(); handleDeleteSelection(); }
+      } else if (e.key === "Escape") {
+        setSelection([]);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selection, handleCopySelection, handlePasteSelection, handleDeleteSelection, lang, toast]);
+
+  // Global mouseup (end drag selection + fill drag)
+  useEffect(() => {
+    const onUp = () => {
+      setIsSelecting(false);
+      if (fillHandleDrag) {
+        if (fillHandleDrag.targetRow !== fillHandleDrag.sourceRow) {
+          handleFillToRange(fillHandleDrag.sourceRow, fillHandleDrag.sourceCol, fillHandleDrag.targetRow);
+        }
+        setFillHandleDrag(null);
+      }
+    };
+    window.addEventListener("mouseup", onUp);
+    return () => window.removeEventListener("mouseup", onUp);
+  }, [fillHandleDrag]); // eslint-disable-line
 
   // ---------------------------------------------------------------------------
   // Fill handle
@@ -224,7 +460,7 @@ export default function TextGenerator() {
     setRows(prev => prev.map((r, i) =>
       i >= minRow && i <= maxRow && i !== sourceRow ? { ...r, [key]: value } : r
     ));
-    toast({ title: lang === "DE" ? "Werte übernommen" : "Values filled", description: `${maxRow - minRow} ${lang === "DE" ? "Zellen aktualisiert." : "cells updated."}` });
+    toast({ title: lang === "DE" ? "Werte übernommen" : "Values filled", description: `${maxRow - minRow} ${lang === "DE" ? "Zellen" : "cells"}` });
   }, [rows, lang, toast]);
 
   const handleFillHandleMouseDown = (e: React.MouseEvent, rowIdx: number, colIdx: number) => {
@@ -232,17 +468,6 @@ export default function TextGenerator() {
     e.stopPropagation();
     setFillHandleDrag({ sourceRow: rowIdx, sourceCol: colIdx, targetRow: rowIdx });
   };
-
-  const handleFillHandleDragMove = useCallback((rowIdx: number) => {
-    if (fillHandleDrag) setFillHandleDrag(prev => prev ? { ...prev, targetRow: rowIdx } : null);
-  }, [fillHandleDrag]);
-
-  const handleFillHandleDragEnd = useCallback(() => {
-    if (fillHandleDrag && fillHandleDrag.targetRow !== fillHandleDrag.sourceRow) {
-      handleFillToRange(fillHandleDrag.sourceRow, fillHandleDrag.sourceCol, fillHandleDrag.targetRow);
-    }
-    setFillHandleDrag(null);
-  }, [fillHandleDrag, handleFillToRange]);
 
   const handleFillDoubleClick = (rowIdx: number, colIdx: number) => {
     const key = COLUMNS[colIdx].key;
@@ -259,149 +484,17 @@ export default function TextGenerator() {
     handleFillToRange(rowIdx, colIdx, last);
   };
 
-  // Global mouseup to end fill drag if released outside table
-  useEffect(() => {
-    const onUp = () => { if (fillHandleDrag) handleFillHandleDragEnd(); };
-    window.addEventListener("mouseup", onUp);
-    return () => window.removeEventListener("mouseup", onUp);
-  }, [fillHandleDrag, handleFillHandleDragEnd]);
-
-  // Focus textarea/input when editing starts
-  useEffect(() => {
-    if (editingCell && editInputRef.current) {
-      editInputRef.current.focus();
-      const len = editInputRef.current.value.length;
-      editInputRef.current.setSelectionRange(len, len);
-    }
-  }, [editingCell]);
-
-  // ---------------------------------------------------------------------------
-  // Keyboard handler
-  // ---------------------------------------------------------------------------
-  const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    const target = e.target as HTMLElement;
-    const isEditing = target.tagName === "TEXTAREA" || (target.tagName === "INPUT" && target.closest("td"));
-    if (isEditing) return;
-
-    const isMac = navigator.platform.toUpperCase().includes("MAC");
-    const ctrlOrCmd = isMac ? e.metaKey : e.ctrlKey;
-
-    if (ctrlOrCmd && e.key === "z") {
-      e.preventDefault();
-      // Undo
-      setHistory(prev => {
-        if (prev.length === 0) return prev;
-        const snapshot = prev[prev.length - 1];
-        setRows(snapshot);
-        toast({ title: lang === "DE" ? "Rückgängig" : "Undo", description: lang === "DE" ? "Letzte Änderung rückgängig gemacht." : "Last change undone." });
-        return prev.slice(0, -1);
-      });
-      return;
-    }
-
-    if (ctrlOrCmd && e.key === "c") {
-      e.preventDefault();
-      if (selection.length === 0) return;
-      // Build matrix
-      const rows_ = [...new Set(selection.map(s => s.row))].sort((a, b) => a - b);
-      const cols_ = [...new Set(selection.map(s => s.col))].sort((a, b) => a - b);
-      const matrix = rows_.map(r => cols_.map(c => {
-        const sel = selection.find(s => s.row === r && s.col === c);
-        if (!sel) return "";
-        return rows[r]?.[COLUMNS[c].key] ?? "";
-      }));
-      const text = matrix.map(r => r.join("\t")).join("\n");
-      navigator.clipboard.writeText(text).catch(() => {});
-      return;
-    }
-
-    if (ctrlOrCmd && e.key === "v") {
-      e.preventDefault();
-      if (selection.length === 0) return;
-      navigator.clipboard.readText().then(text => {
-        const minRow = Math.min(...selection.map(s => s.row));
-        const minCol = Math.min(...selection.map(s => s.col));
-        const targetKey = COLUMNS[minCol].key;
-
-        // For multiline columns (beschreibung, html_de) without structure: paste as single cell
-        const col = COLUMNS[minCol];
-        const hasTab = text.includes("\t");
-        const hasSemicolon = text.includes(";");
-        if ((col.key === "beschreibung" || col.key === "html_de") && !hasTab && !hasSemicolon) {
-          setHistory(prev => [...prev.slice(-49), rows]);
-          setRows(prev => {
-            const next = [...prev];
-            next[minRow] = { ...next[minRow], [targetKey]: text.trimEnd() };
-            return next;
-          });
-          toast({ title: lang === "DE" ? "Eingefügt" : "Pasted" });
-          return;
-        }
-
-        const matrix = parsePasteMatrix(text);
-        if (matrix.length === 0) return;
-        setHistory(prev => [...prev.slice(-49), rows]);
-        setRows(prev => {
-          const next = [...prev];
-          // Ensure enough rows
-          while (next.length < minRow + matrix.length) next.push(createEmptyRow());
-          for (let ri = 0; ri < matrix.length; ri++) {
-            for (let ci = 0; ci < matrix[ri].length; ci++) {
-              const colIdx = minCol + ci;
-              if (colIdx >= COLUMNS.length) continue;
-              const k = COLUMNS[colIdx].key;
-              next[minRow + ri] = { ...next[minRow + ri], [k]: matrix[ri][ci] };
-            }
-          }
-          return next;
-        });
-        toast({ title: lang === "DE" ? "Eingefügt" : "Pasted" });
-      }).catch(() => {});
-      return;
-    }
-
-    if ((e.key === "Delete" || e.key === "Backspace") && selection.length > 0) {
-      e.preventDefault();
-      setHistory(prev => [...prev.slice(-49), rows]);
-      setRows(prev => {
-        const next = [...prev];
-        for (const { row, col } of selection) {
-          const k = COLUMNS[col].key;
-          next[row] = { ...next[row], [k]: "" };
-        }
-        return next;
-      });
-      return;
-    }
-
-    if (e.key === "Escape") {
-      setSelection([]);
-      setEditingCell(null);
-      return;
-    }
-  }, [selection, rows, lang, toast]);
-
-  useEffect(() => {
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [handleKeyDown]);
-
   // ---------------------------------------------------------------------------
   // Generation
   // ---------------------------------------------------------------------------
   const handleGenerate = async () => {
-    const eligible = rows
-      .map((r, i) => ({ r, i }))
-      .filter(({ r }) => r.artikelname.trim() !== "");
-
+    const eligible = rows.map((r, i) => ({ r, i })).filter(({ r }) => r.artikelname.trim() !== "");
     if (eligible.length === 0) {
       toast({ title: lang === "DE" ? "Keine Artikel" : "No items", description: lang === "DE" ? "Bitte mindestens einen Artikelnamen eingeben." : "Please enter at least one item name.", variant: "destructive" });
       return;
     }
-
     setHistory(prev => [...prev.slice(-49), rows]);
     setGenerating(true);
-
     const { data, error } = await apiFetch("generate-online-texts-complex", {
       items: eligible.map(({ r }) => ({
         artikelname: r.artikelname,
@@ -410,104 +503,64 @@ export default function TextGenerator() {
         warengruppe: "",
       })),
     });
-
     setGenerating(false);
-
     if (error || !data) {
       toast({ title: lang === "DE" ? "Fehler" : "Error", description: error?.message ?? "Unknown error", variant: "destructive" });
       return;
     }
-
     const results = (data as { results: { produkttext?: string; Title_Tag?: string; html_de?: string; meta_description?: string; suchbegriffe?: string; error?: string }[] }).results;
-
     setRows(prev => {
       const next = [...prev];
       eligible.forEach(({ i }, idx) => {
         const res = results[idx];
         if (!res || res.error) return;
-        next[i] = {
-          ...next[i],
-          produkttext: res.produkttext ?? "",
-          Title_Tag: res.Title_Tag ?? "",
-          html_de: res.html_de ?? "",
-          meta_description: res.meta_description ?? "",
-          suchbegriffe: res.suchbegriffe ?? "",
-        };
+        next[i] = { ...next[i], produkttext: res.produkttext ?? "", Title_Tag: res.Title_Tag ?? "", html_de: res.html_de ?? "", meta_description: res.meta_description ?? "", suchbegriffe: res.suchbegriffe ?? "" };
       });
       return next;
     });
-
-    toast({ title: lang === "DE" ? "Texte generiert" : "Texts generated", description: `${eligible.length} ${lang === "DE" ? "Artikel verarbeitet." : "items processed."}` });
+    toast({ title: lang === "DE" ? "Texte generiert" : "Texts generated", description: `${eligible.length} ${lang === "DE" ? "Artikel" : "items"}` });
   };
 
   // ---------------------------------------------------------------------------
   // CSV Export
   // ---------------------------------------------------------------------------
   const handleExport = () => {
-    const headers = [
-      "HAN/Barcode/Interner Schlüssel",
-      "Artikelnummer",
-      "produkttext",
-      "Title_Tag",
-      "html_de",
-      "meta_description",
-      "suchbegriffe",
-    ];
-    const exportKeys: TextRowKey[] = ["han", "artikelnummer", "produkttext", "Title_Tag", "html_de", "meta_description", "suchbegriffe"];
-
-    const lines: string[] = [headers.map(csvEscape).join(";")];
+    const headers = ["HAN/Barcode/Interner Schlüssel", "Artikelnummer", "produkttext", "Title_Tag", "html_de", "meta_description", "suchbegriffe"];
+    const keys: TextRowKey[] = ["han", "artikelnummer", "produkttext", "Title_Tag", "html_de", "meta_description", "suchbegriffe"];
+    const lines = [headers.map(csvEscape).join(";")];
     for (const row of rows) {
-      if (exportKeys.every(k => !row[k])) continue; // skip fully empty rows
-      lines.push(exportKeys.map(k => csvEscape(row[k])).join(";"));
+      if (keys.every(k => !row[k])) continue;
+      lines.push(keys.map(k => csvEscape(row[k])).join(";"));
     }
-
-    const content = lines.join("\r\n");
-    const blob = new Blob(["﻿" + content], { type: "text/csv;charset=utf-8" });
+    const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url;
-    a.download = "texte-export.csv";
-    a.click();
+    a.href = url; a.download = "texte-export.csv"; a.click();
     URL.revokeObjectURL(url);
   };
 
   // ---------------------------------------------------------------------------
-  // Undo
+  // Undo button
   // ---------------------------------------------------------------------------
   const handleUndo = () => {
     setHistory(prev => {
       if (prev.length === 0) return prev;
       setRows(prev[prev.length - 1]);
+      lastEditedCellRef.current = null;
       toast({ title: lang === "DE" ? "Rückgängig" : "Undo" });
       return prev.slice(0, -1);
     });
   };
 
   // ---------------------------------------------------------------------------
-  // Add row (+ button)
-  // ---------------------------------------------------------------------------
-  const addRow = () => {
-    setRows(prev => [...prev, createEmptyRow()]);
-    setRowCountInput(String(rows.length + 1));
-  };
-
-  // ---------------------------------------------------------------------------
-  // Row count control apply on blur/enter
-  // ---------------------------------------------------------------------------
-  const applyRowCountInput = () => {
-    const n = Math.max(1, Math.min(200, parseInt(rowCountInput, 10) || rows.length));
-    setRowCountInput(String(n));
-    applyRowCount(n);
-  };
-
-  // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
-  const totalWidth = COLUMNS.reduce((s, c) => s + c.width, 0);
+  const totalWidth = COLUMNS.reduce((s, c) => s + c.width, 0) + 40;
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      {/* Sticky top bar */}
+
+      {/* ── Top bar ─────────────────────────────────────────────────────────── */}
       <div className="sticky top-0 z-20 bg-background border-b border-border px-4 py-2 flex flex-wrap items-center gap-3">
         <a href="/" className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0">
           <ArrowLeft className="h-4 w-4" />
@@ -527,16 +580,11 @@ export default function TextGenerator() {
             value={hersteller}
             onChange={e => setHersteller(e.target.value)}
             placeholder="z.B. SNUG"
-            className="h-7 text-sm w-44"
+            className="h-7 text-sm w-40"
           />
         </div>
 
-        <Button
-          size="sm"
-          className="gap-1.5 h-7 text-xs shrink-0"
-          onClick={handleGenerate}
-          disabled={generating}
-        >
+        <Button size="sm" className="gap-1.5 h-7 text-xs shrink-0" onClick={handleGenerate} disabled={generating}>
           {generating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
           {lang === "DE" ? "Generieren" : "Generate"}
         </Button>
@@ -546,23 +594,14 @@ export default function TextGenerator() {
           CSV Export
         </Button>
 
-        <Button
-          size="sm"
-          variant="outline"
-          className="gap-1.5 h-7 text-xs shrink-0"
-          onClick={handleUndo}
-          disabled={history.length === 0}
-          title={lang === "DE" ? "Rückgängig (Ctrl+Z)" : "Undo (Ctrl+Z)"}
-        >
+        <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs shrink-0" onClick={handleUndo} disabled={history.length === 0} title="Ctrl+Z">
           <Undo2 className="h-3.5 w-3.5" />
         </Button>
 
         <div className="flex items-center gap-1.5 shrink-0">
           <Label className="text-xs text-muted-foreground">{lang === "DE" ? "Zeilen" : "Rows"}</Label>
           <Input
-            type="number"
-            min={1}
-            max={200}
+            type="number" min={1} max={200}
             value={rowCountInput}
             onChange={e => setRowCountInput(e.target.value)}
             onBlur={applyRowCountInput}
@@ -573,29 +612,19 @@ export default function TextGenerator() {
 
         <div className="flex items-center gap-1.5 ml-auto shrink-0">
           <Label className="text-xs text-muted-foreground">DE</Label>
-          <Switch
-            checked={lang === "EN"}
-            onCheckedChange={v => setLang(v ? "EN" : "DE")}
-            className="scale-75"
-          />
+          <Switch checked={lang === "EN"} onCheckedChange={v => setLang(v ? "EN" : "DE")} className="scale-75" />
           <Label className="text-xs text-muted-foreground">EN</Label>
         </div>
       </div>
 
-      {/* Table */}
-      <div className="flex-1 overflow-x-auto">
+      {/* ── Table ───────────────────────────────────────────────────────────── */}
+      <div className="flex-1 overflow-x-auto"
+        onMouseLeave={() => setIsSelecting(false)}
+      >
         <table
-          className="table-fixed border-collapse text-sm"
-          style={{ minWidth: totalWidth + 40 }}
-          onMouseDown={e => {
-            // Click on non-cell area deselects
-            if ((e.target as HTMLElement).closest("td, th") === null) {
-              setSelection([]);
-              if (editingCell) commitEdit();
-            }
-          }}
+          className="table-fixed border-collapse text-sm select-none"
+          style={{ minWidth: totalWidth }}
         >
-          {/* Col widths */}
           <colgroup>
             <col style={{ width: 40 }} />
             {COLUMNS.map(c => <col key={c.key} style={{ width: c.width }} />)}
@@ -604,18 +633,32 @@ export default function TextGenerator() {
           {/* Sticky header */}
           <thead className="sticky top-[49px] z-10">
             <tr>
-              <th className="border border-border bg-muted px-2 py-1.5 text-left text-xs font-medium text-muted-foreground w-10">#</th>
+              <th className="border border-[hsl(0,0%,85%)] bg-muted px-2 py-1.5 text-left text-xs font-medium text-muted-foreground w-10 select-none">#</th>
               {COLUMNS.map(c => (
                 <th
                   key={c.key}
-                  className={`border border-border px-2 py-1.5 text-left text-xs font-medium ${
+                  className={`border border-[hsl(0,0%,85%)] px-2 py-1.5 text-left text-xs font-semibold cursor-pointer hover:bg-muted/80 ${
                     c.isOutput
                       ? "bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300"
                       : "bg-muted text-muted-foreground"
                   }`}
                   style={{ width: c.width }}
+                  onClick={e => {
+                    const cells: CellPos[] = rows.map((_, r) => ({ row: r, col: COLUMNS.indexOf(c) }));
+                    if (e.shiftKey && selectionStart) {
+                      const ci = COLUMNS.indexOf(c);
+                      const all: CellPos[] = [];
+                      for (let r = 0; r < rows.length; r++)
+                        for (let cc = Math.min(selectionStart.col, ci); cc <= Math.max(selectionStart.col, ci); cc++)
+                          all.push({ row: r, col: cc });
+                      setSelection(all);
+                    } else {
+                      setSelection(cells);
+                      setSelectionStart({ row: 0, col: COLUMNS.indexOf(c) });
+                    }
+                  }}
                 >
-                  <div className="font-semibold">{lang === "DE" ? c.labelDE : c.labelEN}</div>
+                  {lang === "DE" ? c.labelDE : c.labelEN}
                   {c.labelDE !== c.labelEN && (
                     <div className="text-[10px] opacity-60 font-normal">{lang === "DE" ? c.labelEN : c.labelDE}</div>
                   )}
@@ -626,93 +669,66 @@ export default function TextGenerator() {
 
           <tbody>
             {rows.map((row, rowIdx) => (
-              <tr key={row.id} className="hover:bg-muted/20 group">
-                <td className="border border-border px-2 py-0.5 text-center text-xs text-muted-foreground bg-muted/40 select-none">
+              <tr key={row.id} className="group hover:bg-muted/10">
+                {/* Row number — click to select row */}
+                <td
+                  className="border border-[hsl(0,0%,85%)] px-1 py-0 text-center text-xs text-muted-foreground bg-muted/40 select-none cursor-pointer hover:bg-muted/70"
+                  onMouseDown={e => handleRowSelect(rowIdx, e)}
+                >
                   {rowIdx + 1}
                 </td>
+
                 {COLUMNS.map((col, colIdx) => {
                   const isSelected = isCellSelected(rowIdx, colIdx);
-                  const isEditing = editingCell?.row === rowIdx && editingCell?.col === colIdx;
                   const isInFillRange = fillHandleDrag &&
                     colIdx === fillHandleDrag.sourceCol &&
                     rowIdx !== fillHandleDrag.sourceRow &&
                     rowIdx >= Math.min(fillHandleDrag.sourceRow, fillHandleDrag.targetRow) &&
                     rowIdx <= Math.max(fillHandleDrag.sourceRow, fillHandleDrag.targetRow);
                   const value = row[col.key];
-                  const hasValue = value.trim().length > 0;
 
                   return (
                     <td
                       key={col.key}
-                      style={{ width: col.width }}
-                      className={`group/cell border border-border px-0 py-0 relative align-top cursor-default select-none ${
+                      className={`group/cell border border-[hsl(0,0%,85%)] p-0 relative ${
                         isInFillRange
                           ? "bg-primary/30 ring-1 ring-primary ring-inset"
                           : isSelected
-                          ? "bg-blue-100 dark:bg-blue-900/40 ring-2 ring-primary ring-inset"
+                          ? "bg-primary/20 ring-2 ring-primary ring-inset"
                           : col.isOutput
-                          ? hasValue
-                            ? "bg-blue-50/40 dark:bg-blue-950/10"
-                            : "bg-muted/10"
-                          : "bg-white dark:bg-background"
+                          ? "bg-blue-50/30 dark:bg-blue-950/10"
+                          : ""
                       }`}
+                      style={{ width: col.width }}
                       onMouseDown={e => handleCellMouseDown(e, rowIdx, colIdx)}
-                      onDoubleClick={() => handleCellDoubleClick(rowIdx, colIdx)}
-                      onMouseEnter={() => {
-                        if (fillHandleDrag && colIdx === fillHandleDrag.sourceCol) {
-                          handleFillHandleDragMove(rowIdx);
-                        }
-                      }}
-                      onMouseUp={() => {
-                        if (fillHandleDrag) handleFillHandleDragEnd();
-                      }}
+                      onMouseEnter={() => handleCellMouseEnter(rowIdx, colIdx)}
+                      onMouseUp={() => { if (fillHandleDrag) { /* handled by global */ } }}
                     >
-                      {isEditing ? (
-                        col.multiline ? (
-                          <textarea
-                            ref={el => { editInputRef.current = el; }}
-                            value={editValue}
-                            onChange={e => setEditValue(e.target.value)}
-                            onBlur={commitEdit}
-                            onKeyDown={e => {
-                              if (e.key === "Escape") { e.preventDefault(); cancelEdit(); }
-                              if (e.key === "Tab") { e.preventDefault(); commitEdit(); }
-                            }}
-                            className="w-full min-h-16 resize-none bg-transparent outline outline-2 outline-primary px-2 py-1 text-sm font-inherit"
-                            style={{ width: col.width - 2 }}
-                          />
-                        ) : (
-                          <input
-                            ref={el => { editInputRef.current = el; }}
-                            type="text"
-                            value={editValue}
-                            onChange={e => setEditValue(e.target.value)}
-                            onBlur={commitEdit}
-                            onKeyDown={e => {
-                              if (e.key === "Escape") { e.preventDefault(); cancelEdit(); }
-                              if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); commitEdit(); }
-                            }}
-                            className="w-full bg-transparent outline outline-2 outline-primary px-2 py-1 text-sm"
-                            style={{ width: col.width - 2 }}
-                          />
-                        )
-                      ) : (
-                        <div
-                          className={`px-2 py-1 min-h-[28px] text-sm whitespace-pre-wrap break-words ${
-                            !hasValue ? "text-muted-foreground/40 italic text-xs" : ""
-                          }`}
-                          style={{ minHeight: col.multiline ? 48 : 28 }}
-                        >
-                          {value || ""}
-                        </div>
-                      )}
+                      <input
+                        type="text"
+                        value={value}
+                        data-row={rowIdx}
+                        data-col={colIdx}
+                        onChange={e => handleCellChange(row.id, col.key, e.target.value)}
+                        onPaste={e => handleCellPaste(e, rowIdx, colIdx, col.key)}
+                        onKeyDown={e => handleKeyNavigation(e, rowIdx, colIdx)}
+                        onFocus={() => {
+                          if (!selection.some(s => s.row === rowIdx && s.col === colIdx)) {
+                            setSelection([{ row: rowIdx, col: colIdx }]);
+                            setSelectionStart({ row: rowIdx, col: colIdx });
+                          }
+                        }}
+                        className="w-full px-2 py-1.5 bg-transparent border-none outline-none focus:ring-2 focus:ring-primary/50 text-sm"
+                        style={{ minWidth: 0 }}
+                      />
+
                       {/* Fill handle (black cube) */}
-                      {hasValue && !isEditing && rowIdx < rows.length - 1 && (
+                      {value && rowIdx < rows.length - 1 && (
                         <div
                           className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-primary cursor-crosshair z-20 border border-background opacity-0 group-hover/cell:opacity-100"
                           onMouseDown={e => handleFillHandleMouseDown(e, rowIdx, colIdx)}
                           onDoubleClick={e => { e.stopPropagation(); handleFillDoubleClick(rowIdx, colIdx); }}
-                          title={lang === "DE" ? "Ziehen zum Ausfüllen, Doppelklick zum Auto-Ausfüllen" : "Drag to fill, double-click to auto-fill"}
+                          title={lang === "DE" ? "Ziehen zum Ausfüllen" : "Drag to fill"}
                         />
                       )}
                     </td>
@@ -725,8 +741,11 @@ export default function TextGenerator() {
             <tr>
               <td
                 colSpan={COLUMNS.length + 1}
-                className="border border-border px-3 py-1 text-center cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/30 text-xs transition-colors select-none"
-                onClick={addRow}
+                className="border border-[hsl(0,0%,85%)] px-3 py-1 text-center cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/30 text-xs transition-colors select-none"
+                onClick={() => {
+                  setRows(prev => [...prev, createEmptyRow()]);
+                  setRowCountInput(String(rows.length + 1));
+                }}
               >
                 + {lang === "DE" ? "Zeile hinzufügen" : "Add row"}
               </td>
@@ -735,11 +754,14 @@ export default function TextGenerator() {
         </table>
       </div>
 
-      {/* Footer */}
+      {/* ── Footer ──────────────────────────────────────────────────────────── */}
       <div className="sticky bottom-0 bg-background border-t border-border px-4 py-1.5 flex items-center gap-4 text-xs text-muted-foreground">
         <span>{rows.length} {lang === "DE" ? "Zeilen" : "rows"}</span>
         {selection.length > 0 && (
           <span>{selection.length} {lang === "DE" ? "Zellen ausgewählt" : "cells selected"}</span>
+        )}
+        {history.length > 0 && (
+          <span className="ml-auto opacity-50">{history.length} {lang === "DE" ? "Schritte" : "steps"} (Ctrl+Z)</span>
         )}
       </div>
     </div>
