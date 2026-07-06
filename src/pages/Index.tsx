@@ -357,7 +357,8 @@ const buildRow = (
   merkmaleGroesse: string = "", merkmaleArt: string = "", merkmaleFarbe: string = "",
   description: string = "",
   produkttext: string = "", titleTag: string = "", htmlDe: string = "",
-  metaDescription: string = "", suchbegriffe: string = ""
+  metaDescription: string = "", suchbegriffe: string = "",
+  cat1: string = "", cat2: string = "", cat3: string = ""
 ): Record<string, string | number> => {
   let check = "";
   try {
@@ -424,6 +425,9 @@ const buildRow = (
     "html_de": htmlDe || "",
     "meta_description": metaDescription || "",
     "suchbegriffe": suchbegriffe || "",
+    "cat1": cat1 || "",
+    "cat2": cat2 || "",
+    "cat3": cat3 || "",
   };
 };
 
@@ -504,6 +508,8 @@ const Index = () => {
   const [isRestructuring, setIsRestructuring] = useState(false);
   const [isGeneratingTexts, setIsGeneratingTexts] = useState(false);
   const [textGenerating, setTextGenerating] = useState(false);
+  const [kategorienToggle, setKategorienToggle] = useState(false);
+  const pendingExportTextsRef = useRef<typeof confirmedTexts | undefined>(undefined);
   const [textPreviewOpen, setTextPreviewOpen] = useState(false);
   const [textPreviewRows, setTextPreviewRows] = useState<TextPreviewRow[]>([]);
   const [confirmedTexts, setConfirmedTexts] = useState<Record<string, { produkttext: string; Title_Tag: string; html_de: string; meta_description: string; suchbegriffe: string }>>({});
@@ -1981,15 +1987,21 @@ const Index = () => {
   const handleCategoryConfirm = (confirmedRows: CategoryPreviewRow[]) => {
     // Save confirmed category paths back by product name for future reuse
     const updated: Record<string, string> = { ...confirmedCategories };
+    const categoriesMap: Record<string, string> = {};
     confirmedRows.forEach(r => {
       const name = categoryArtikelToName[r.artikelnummer];
-      if (name) updated[name] = r.categoryPath;
+      if (name) {
+        updated[name] = r.categoryPath;
+        categoriesMap[name] = r.categoryPath;
+      }
     });
     setConfirmedCategories(updated);
-    exportCategoryCSV(confirmedRows);
+    // Export the main CSV with category columns filled
+    processAndDownload(pendingExportTextsRef.current, categoriesMap);
+    pendingExportTextsRef.current = undefined;
   };
 
-  const processAndDownload = async (textsOverride?: typeof confirmedTexts) => {
+  const processAndDownload = async (textsOverride?: typeof confirmedTexts, categoriesOverride?: Record<string, string>) => {
     const AufAB = parseInt(ab) || 1;
     const AufAuf = parseInt(auf) || 2;
     const AufSe = aufSe;
@@ -2005,6 +2017,7 @@ const Index = () => {
     });
 
     const textsByName = textsOverride ?? confirmedTexts;
+    const catsByName = categoriesOverride ?? {};
 
     const outputRows: Record<string, string | number>[] = [];
 
@@ -2030,6 +2043,11 @@ const Index = () => {
       const parentFarbe = unionMulti("MerkmaleFarbe");
 
       const tx = textsByName[name] || { produkttext: "", Title_Tag: "", html_de: "", meta_description: "", suchbegriffe: "" };
+      const catPath = (catsByName[name] || "").trim();
+      const catParts = catPath ? catPath.split(" -> ").map(p => p.trim()).filter(Boolean) : [];
+      const cat1 = catParts[0] || "";
+      const cat2 = catParts[1] || "";
+      const cat3 = catParts[2] || "";
 
       if (hasParent) {
         const firstRowWarengruppe = groupRows[0]?.WarenGruppe || "";
@@ -2046,7 +2064,8 @@ const Index = () => {
           vaterArtikelnummer, "", name, "", color, "", "Vater", minEK, minVK, hersteller,
           AufAB, AufAuf, AufSe, Lieferstatus, LieferzeitVal, "", lieferant, firstRowWarengruppe, translated,
           parentGroesse, parentArt, parentFarbe, "",
-          tx.produkttext, tx.Title_Tag, tx.html_de, tx.meta_description, tx.suchbegriffe
+          tx.produkttext, tx.Title_Tag, tx.html_de, tx.meta_description, tx.suchbegriffe,
+          cat1, cat2, cat3
         ));
       }
 
@@ -2082,7 +2101,8 @@ const Index = () => {
           rowArt,
           rowFarbe,
           safe(r.Description),
-          tx.produkttext, tx.Title_Tag, tx.html_de, tx.meta_description, tx.suchbegriffe
+          tx.produkttext, tx.Title_Tag, tx.html_de, tx.meta_description, tx.suchbegriffe,
+          cat1, cat2, cat3
         ));
       });
     });
@@ -2600,20 +2620,33 @@ const Index = () => {
             </Button>
           )}
 
+          {/* ── Kategorien toggle ── */}
+          <div className="flex items-center gap-1.5">
+            <Switch id="kategorienToggle" checked={kategorienToggle} onCheckedChange={setKategorienToggle} className="scale-90" />
+            <Label htmlFor="kategorienToggle" className="text-xs font-normal cursor-pointer whitespace-nowrap">
+              {lang === "DE" ? "Kategorien" : "Categories"}
+            </Label>
+          </div>
+
           {/* ── Primary export ── */}
-          <Button onClick={processAndDownload} size="sm" className="gap-1.5" disabled={isGeneratingTexts}>
-            {isGeneratingTexts ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-            {isGeneratingTexts ? (lang === "DE" ? "Generiere..." : "Generating...") : t("csvExport", lang)}
+          <Button
+            onClick={() => {
+              if (kategorienToggle) {
+                pendingExportTextsRef.current = undefined;
+                handleCategoryMapping();
+              } else {
+                processAndDownload();
+              }
+            }}
+            size="sm" className="gap-1.5" disabled={isGeneratingTexts || isMapping}
+          >
+            {isMapping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+            {isMapping ? (lang === "DE" ? "Klassifiziere..." : "Classifying...") : t("csvExport", lang)}
           </Button>
 
           <div className="w-px h-5 bg-border" />
 
           {/* ── AI tools ── */}
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={handleCategoryMapping} disabled={isMapping}>
-            {isMapping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FolderTree className="h-3.5 w-3.5" />}
-            {isMapping ? (lang === "DE" ? "Lädt..." : "Loading...") : (lang === "DE" ? "Kategorien" : "Categories")}
-          </Button>
-
           <Button variant="outline" size="sm" className="gap-1.5" onClick={handleAIClassify} disabled={isClassifying}>
             {isClassifying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
             {isClassifying ? t("aiClassifying", lang) : t("aiClassify", lang)}
@@ -2632,7 +2665,12 @@ const Index = () => {
             map[r.name] = { produkttext: r.produkttext, Title_Tag: r.Title_Tag, html_de: r.html_de, meta_description: r.meta_description, suchbegriffe: r.suchbegriffe };
           });
           setConfirmedTexts(map);
-          processAndDownload(map);
+          if (kategorienToggle) {
+            pendingExportTextsRef.current = map;
+            handleCategoryMapping();
+          } else {
+            processAndDownload(map);
+          }
         }}
       />
       <CategoryPreviewModal
