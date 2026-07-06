@@ -596,6 +596,10 @@ const Index = () => {
   const [isMapping, setIsMapping] = useState(false);
   const [categoryPreviewOpen, setCategoryPreviewOpen] = useState(false);
   const [categoryPreviewRows, setCategoryPreviewRows] = useState<CategoryPreviewRow[]>([]);
+  // Maps productName → confirmed categoryPath (persists across mapping runs like confirmedTexts)
+  const [confirmedCategories, setConfirmedCategories] = useState<Record<string, string>>({});
+  // Maps artikelnummer → productName so onConfirm can save back to confirmedCategories
+  const [categoryArtikelToName, setCategoryArtikelToName] = useState<Record<string, string>>({});
 
   const handleAIClassify = async () => {
     const filledRows = rows.filter(r => getClothName(r).trim() !== "");
@@ -1811,57 +1815,155 @@ const Index = () => {
   };
 
   const handleCategoryMapping = async () => {
-    // Group rows by unique product (name + color)
-    const groups: Record<string, ClothRow[]> = {};
-    rows.forEach(row => {
-      const name = getClothName(row).trim();
-      if (!name) return;
-      const key = `${name}|${(row.color || "").trim()}`;
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(row);
+    const filledRows = rows.filter(r => getClothName(r).trim() !== "");
+    if (filledRows.length === 0) {
+      toast({ title: t("noData", lang), description: t("noDataDesc", lang), variant: "destructive" });
+      return;
+    }
+
+    // Rule 1: compute max VK per product name — skip if max VK < 19 (same as text gen)
+    const vkByName: Record<string, number> = {};
+    filledRows.forEach(r => {
+      const n = getClothName(r);
+      if (!n) return;
+      const raw = String(r.VK ?? "").replace(",", ".").replace(/[^\d.\-]/g, "");
+      const vk = parseFloat(raw);
+      if (!isNaN(vk)) {
+        if (!(n in vkByName) || vk > vkByName[n]) vkByName[n] = vk;
+      } else if (!(n in vkByName)) {
+        vkByName[n] = 0;
+      }
     });
 
-    const productKeys = Object.keys(groups);
-    if (productKeys.length === 0) {
-      toast({ title: t("noData", lang), description: t("noDataDesc", lang), variant: "destructive" });
+    // Rule 2: deduplicate by product name only — color/size variations share the same category
+    // Build one entry per unique product name; collect all color-variant artikelnummern
+    const nameGroups: Record<string, { first: ClothRow; artikelnummern: string[] }> = {};
+    const artikelToName: Record<string, string> = {};
+    filledRows.forEach(r => {
+      const name = getClothName(r).trim();
+      if (!name) return;
+      const wg = r.WarenGruppe || "";
+      const artnr = artikelnummerBuilder(kurzl, name, r.color || "", "", wg, aufSe);
+      if (!nameGroups[name]) nameGroups[name] = { first: r, artikelnummern: [] };
+      if (!nameGroups[name].artikelnummern.includes(artnr)) {
+        nameGroups[name].artikelnummern.push(artnr);
+      }
+      artikelToName[artnr] = name;
+    });
+
+    // Also include Vater-Artikel artikelnummer if vaterstat is on and there are multiple variants
+    if (vaterstat) {
+      Object.keys(nameGroups).forEach(name => {
+        const { first, artikelnummern } = nameGroups[name];
+        if (artikelnummern.length > 1) {
+          const wg = first.WarenGruppe || "";
+          // Vater has same artikelnummer as first color variant in our builder (empty size/color slot)
+          const vaterArtnr = artikelnummerBuilder(kurzl, name, first.color || "", "", wg, aufSe);
+          artikelToName[vaterArtnr] = name;
+        }
+      });
+    }
+    setCategoryArtikelToName(prev => ({ ...prev, ...artikelToName }));
+
+    // Rule 1 applied: skip VK < 19
+    const priceSkipped: string[] = [];
+    const priceEligible = Object.keys(nameGroups).filter(name => {
+      const ok = (vkByName[name] ?? 0) >= 19;
+      if (!ok) priceSkipped.push(name);
+      return ok;
+    });
+
+    // Rule 3: skip already-confirmed products (like confirmedTexts reuse)
+    const alreadyConfirmed: string[] = [];
+    const needsClassification = priceEligible.filter(name => {
+      if (confirmedCategories[name]) { alreadyConfirmed.push(name); return false; }
+      return true;
+    });
+
+    // Rule 4: reuse by Warengruppe + Art — two products with identical type → same category
+    // (biggest token saver: "Kleidung Mode|T-Shirts" products all map to the same JTL path)
+    const wgArtMap = new Map<string, string>(); // "WG|Art" → source product name
+    const toClassify: string[] = [];
+    const reuseFrom: Record<string, string> = {}; // name → name to copy path from
+
+    needsClassification.forEach(name => {
+      const { first } = nameGroups[name];
+      const wg = (first.WarenGruppe || "").trim();
+      const art = (first.MerkmaleArt || "").trim();
+      const wgArtKey = `${wg}|${art}`;
+      if (wg && art && wgArtMap.has(wgArtKey)) {
+        reuseFrom[name] = wgArtMap.get(wgArtKey)!;
+      } else {
+        if (wg && art) wgArtMap.set(wgArtKey, name);
+        toClassify.push(name);
+      }
+    });
+
+    const callsMade = toClassify.length;
+    const reuseCount = Object.keys(reuseFrom).length;
+    const priceSkippedCount = priceSkipped.length;
+    const confirmedReuseCount = alreadyConfirmed.length;
+
+    if (callsMade === 0 && reuseCount === 0 && confirmedReuseCount === 0) {
+      toast({ title: lang === "DE" ? "Keine Produkte" : "No products", description: lang === "DE" ? "Alle Produkte wurden übersprungen (VK<19 oder bereits bestätigt)" : "All products skipped (VK<19 or already confirmed)" });
       return;
     }
 
     setIsMapping(true);
     try {
-      const items = productKeys.map(key => {
-        const [name, color] = key.split("|");
-        const groupRows = groups[key];
-        const first = groupRows[0];
-        const wg = first.WarenGruppe || "";
-        const artikelnummer = artikelnummerBuilder(kurzl, name, color, "", wg, aufSe);
-        return {
-          artikelnummer,
-          artikelname: name,
-          farbe: color,
-          hersteller: hersteller.trim(),
-          warengruppe: wg,
-          art: first.MerkmaleArt || "",
-          beschreibung: first.Description || "",
-        };
+      const generatedCategoryMap: Record<string, string> = { ...confirmedCategories };
+
+      if (toClassify.length > 0) {
+        const items = toClassify.map(name => {
+          const { first } = nameGroups[name];
+          const wg = first.WarenGruppe || "";
+          const artnr = artikelnummerBuilder(kurzl, name, first.color || "", "", wg, aufSe);
+          return {
+            artikelnummer: artnr,
+            artikelname: name,
+            farbe: first.color || "",
+            hersteller: hersteller.trim(),
+            warengruppe: wg,
+            art: first.MerkmaleArt || "",
+            beschreibung: first.Description || "",
+          };
+        });
+
+        const res = await fetch("/api/map-categories", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error || res.statusText);
+
+        const results: { artikelnummer: string; categoryPath: string }[] = data.results;
+        toClassify.forEach((name, i) => {
+          generatedCategoryMap[name] = (results[i]?.categoryPath || "").trim();
+        });
+      }
+
+      // Apply Warengruppe+Art reuse
+      Object.entries(reuseFrom).forEach(([dst, src]) => {
+        generatedCategoryMap[dst] = generatedCategoryMap[src] || "";
       });
 
-      const res = await fetch("/api/map-categories", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items }),
+      toast({
+        title: lang === "DE" ? "Kategorien klassifiziert" : "Categories classified",
+        description: lang === "DE"
+          ? `${callsMade} KI-Aufrufe · ${reuseCount} Typ-Reuse · ${confirmedReuseCount} bereits bestätigt · ${priceSkippedCount} übersprungen (VK<19)`
+          : `${callsMade} AI calls · ${reuseCount} type-reuse · ${confirmedReuseCount} already confirmed · ${priceSkippedCount} skipped (VK<19)`,
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || res.statusText);
 
-      const results: { artikelnummer: string; categoryPath: string }[] = data.results;
-
-      // Build preview rows
-      const previewRows: CategoryPreviewRow[] = results.map((r, idx) => ({
-        id: crypto.randomUUID(),
-        artikelnummer: r.artikelnummer || items[idx]?.artikelnummer || "",
-        categoryPath: (r.categoryPath || "").trim(),
-      }));
+      // Build preview rows: one row per color-variant artikelnummer, all sharing the name's category
+      const previewRows: CategoryPreviewRow[] = [];
+      priceEligible.forEach(name => {
+        const { artikelnummern } = nameGroups[name];
+        const categoryPath = generatedCategoryMap[name] || "";
+        artikelnummern.forEach(artnr => {
+          previewRows.push({ id: crypto.randomUUID(), artikelnummer: artnr, categoryPath });
+        });
+      });
 
       setCategoryPreviewRows(previewRows);
       setCategoryPreviewOpen(true);
@@ -1874,6 +1976,17 @@ const Index = () => {
     } finally {
       setIsMapping(false);
     }
+  };
+
+  const handleCategoryConfirm = (confirmedRows: CategoryPreviewRow[]) => {
+    // Save confirmed category paths back by product name for future reuse
+    const updated: Record<string, string> = { ...confirmedCategories };
+    confirmedRows.forEach(r => {
+      const name = categoryArtikelToName[r.artikelnummer];
+      if (name) updated[name] = r.categoryPath;
+    });
+    setConfirmedCategories(updated);
+    exportCategoryCSV(confirmedRows);
   };
 
   const processAndDownload = async (textsOverride?: typeof confirmedTexts) => {
@@ -2527,7 +2640,7 @@ const Index = () => {
         onOpenChange={setCategoryPreviewOpen}
         initialRows={categoryPreviewRows}
         lang={lang}
-        onConfirm={exportCategoryCSV}
+        onConfirm={handleCategoryConfirm}
       />
     </div>
   );
