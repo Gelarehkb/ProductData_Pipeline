@@ -1776,13 +1776,15 @@ const Index = () => {
     let maxDepth = 0;
 
     confirmedRows.forEach(r => {
-      const path = (r.categoryPath || "").trim();
-      if (!path) return;
-      const parts = path.split(" -> ").map(p => p.trim()).filter(Boolean);
-      maxDepth = Math.max(maxDepth, parts.length);
-      for (let depth = 1; depth <= parts.length; depth++) {
-        csvRows.push([r.artikelnummer, r.han || "", r.barcode || "", ...parts.slice(0, depth)]);
-      }
+      (r.categoryPaths || []).forEach(path => {
+        const trimmed = path.trim();
+        if (!trimmed) return;
+        const parts = trimmed.split(" -> ").map(p => p.trim()).filter(Boolean);
+        maxDepth = Math.max(maxDepth, parts.length);
+        for (let depth = 1; depth <= parts.length; depth++) {
+          csvRows.push([r.artikelnummer, r.han || "", r.barcode || "", ...parts.slice(0, depth)]);
+        }
+      });
     });
 
     if (csvRows.length === 0) {
@@ -1963,7 +1965,7 @@ const Index = () => {
         const { variants } = nameGroups[name];
         const categoryPath = generatedCategoryMap[name] || "";
         variants.forEach(({ artnr, han, barcode }) => {
-          previewRows.push({ id: crypto.randomUUID(), artikelnummer: artnr, han, barcode, categoryPath });
+          previewRows.push({ id: crypto.randomUUID(), artikelnummer: artnr, han, barcode, categoryPaths: categoryPath ? [categoryPath] : [] });
         });
       });
 
@@ -1984,7 +1986,7 @@ const Index = () => {
     const updated: Record<string, string> = { ...confirmedCategories };
     confirmedRows.forEach(r => {
       const name = categoryArtikelToName[r.artikelnummer];
-      if (name) updated[name] = r.categoryPath;
+      if (name) updated[name] = r.categoryPaths[0] || ""; // save primary path for next-run reuse
     });
     setConfirmedCategories(updated);
     exportCategoryCSV(confirmedRows);
