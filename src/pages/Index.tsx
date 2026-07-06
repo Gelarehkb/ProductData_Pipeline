@@ -357,8 +357,7 @@ const buildRow = (
   merkmaleGroesse: string = "", merkmaleArt: string = "", merkmaleFarbe: string = "",
   description: string = "",
   produkttext: string = "", titleTag: string = "", htmlDe: string = "",
-  metaDescription: string = "", suchbegriffe: string = "",
-  cat1: string = "", cat2: string = "", cat3: string = ""
+  metaDescription: string = "", suchbegriffe: string = ""
 ): Record<string, string | number> => {
   let check = "";
   try {
@@ -380,6 +379,7 @@ const buildRow = (
     "EAN": EAN || "",
     "HAN": HAN || "",
     "Artikelname/Etikettenname": nameWithColor,
+    "Artikelname/Online-shop": nameWithColor,
     "VarName 1 (Größe)": "Größe",
     "Wert Name 1": size || "",
     "Größe Sort.no": "",
@@ -425,9 +425,6 @@ const buildRow = (
     "html_de": htmlDe || "",
     "meta_description": metaDescription || "",
     "suchbegriffe": suchbegriffe || "",
-    "cat1": cat1 || "",
-    "cat2": cat2 || "",
-    "cat3": cat3 || "",
   };
 };
 
@@ -1990,9 +1987,10 @@ const Index = () => {
       if (name) updated[name] = r.categoryPath;
     });
     setConfirmedCategories(updated);
+    exportCategoryCSV(confirmedRows);
   };
 
-  const processAndDownload = async (textsOverride?: typeof confirmedTexts, categoriesOverride?: Record<string, string>) => {
+  const processAndDownload = async (textsOverride?: typeof confirmedTexts) => {
     const AufAB = parseInt(ab) || 1;
     const AufAuf = parseInt(auf) || 2;
     const AufSe = aufSe;
@@ -2008,7 +2006,6 @@ const Index = () => {
     });
 
     const textsByName = textsOverride ?? confirmedTexts;
-    const catsByName = categoriesOverride ?? (kategorienToggle ? confirmedCategories : {});
 
     const outputRows: Record<string, string | number>[] = [];
 
@@ -2034,11 +2031,6 @@ const Index = () => {
       const parentFarbe = unionMulti("MerkmaleFarbe");
 
       const tx = textsByName[name] || { produkttext: "", Title_Tag: "", html_de: "", meta_description: "", suchbegriffe: "" };
-      const catPath = (catsByName[name] || "").trim();
-      const catParts = catPath ? catPath.split(" -> ").map(p => p.trim()).filter(Boolean) : [];
-      const cat1 = catParts[0] || "";
-      const cat2 = catParts[1] || "";
-      const cat3 = catParts[2] || "";
 
       if (hasParent) {
         const firstRowWarengruppe = groupRows[0]?.WarenGruppe || "";
@@ -2055,8 +2047,7 @@ const Index = () => {
           vaterArtikelnummer, "", name, "", color, "", "Vater", minEK, minVK, hersteller,
           AufAB, AufAuf, AufSe, Lieferstatus, LieferzeitVal, "", lieferant, firstRowWarengruppe, translated,
           parentGroesse, parentArt, parentFarbe, "",
-          tx.produkttext, tx.Title_Tag, tx.html_de, tx.meta_description, tx.suchbegriffe,
-          cat1, cat2, cat3
+          tx.produkttext, tx.Title_Tag, tx.html_de, tx.meta_description, tx.suchbegriffe
         ));
       }
 
@@ -2092,8 +2083,7 @@ const Index = () => {
           rowArt,
           rowFarbe,
           safe(r.Description),
-          tx.produkttext, tx.Title_Tag, tx.html_de, tx.meta_description, tx.suchbegriffe,
-          cat1, cat2, cat3
+          tx.produkttext, tx.Title_Tag, tx.html_de, tx.meta_description, tx.suchbegriffe
         ));
       });
     });
