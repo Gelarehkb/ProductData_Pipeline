@@ -1902,15 +1902,23 @@ const Index = () => {
               {lang === "DE" ? "Datei importieren" : "Import file"}
             </Button>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            onClick={() => setLang(prev => prev === "DE" ? "EN" : "DE")}
-          >
-            <Globe className="h-4 w-4" />
-            {lang === "DE" ? "EN" : "DE"}
-          </Button>
+          <div className="flex items-center gap-2">
+            <a href="/text-generator">
+              <Button variant="outline" size="sm" className="gap-1.5 text-xs">
+                <Sparkles className="h-3.5 w-3.5" />
+                {lang === "DE" ? "Texte" : "Texts"}
+              </Button>
+            </a>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => setLang(prev => prev === "DE" ? "EN" : "DE")}
+            >
+              <Globe className="h-4 w-4" />
+              {lang === "DE" ? "EN" : "DE"}
+            </Button>
+          </div>
         </div>
         
         {/* Input Controls */}
