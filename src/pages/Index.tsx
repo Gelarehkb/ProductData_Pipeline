@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { FindReplaceDialog } from "@/components/FindReplaceDialog";
 import { ImportDialog, type ImportTargetField } from "@/components/ImportDialog";
 import { TextPreviewModal, type TextPreviewRow } from "@/components/TextPreviewModal";
+import { CategoryPreviewModal, type CategoryPreviewRow } from "@/components/CategoryPreviewModal";
 async function apiFetch(fn: string, body: object): Promise<{ data: unknown; error: Error | null }> {
   try {
     const res = await fetch(`/api/${fn}`, {
@@ -593,6 +594,8 @@ const Index = () => {
   const [isClassifying, setIsClassifying] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
   const [isMapping, setIsMapping] = useState(false);
+  const [categoryPreviewOpen, setCategoryPreviewOpen] = useState(false);
+  const [categoryPreviewRows, setCategoryPreviewRows] = useState<CategoryPreviewRow[]>([]);
 
   const handleAIClassify = async () => {
     const filledRows = rows.filter(r => getClothName(r).trim() !== "");
@@ -1761,8 +1764,54 @@ const Index = () => {
     }
   };
 
+  const exportCategoryCSV = (confirmedRows: CategoryPreviewRow[]) => {
+    const escSemi = (v: string) => (v.includes(";") || v.includes('"') ? `"${v.replace(/"/g, '""')}"` : v);
+    const csvRows: string[][] = [];
+    let maxDepth = 0;
+
+    confirmedRows.forEach(r => {
+      const path = (r.categoryPath || "").trim();
+      if (!path) return;
+      const parts = path.split(" -> ").map(p => p.trim()).filter(Boolean);
+      maxDepth = Math.max(maxDepth, parts.length);
+      for (let depth = 1; depth <= parts.length; depth++) {
+        csvRows.push([r.artikelnummer, ...parts.slice(0, depth)]);
+      }
+    });
+
+    if (csvRows.length === 0) {
+      toast({ title: lang === "DE" ? "Keine Kategorien" : "No categories", variant: "destructive" });
+      return;
+    }
+
+    const totalCols = 1 + maxDepth;
+    const headers = ["Artikelnummer", ...Array.from({ length: maxDepth }, (_, i) => `cat${i + 1}`)];
+    const lines = [
+      headers.map(escSemi).join(";"),
+      ...csvRows.map(row => {
+        const padded = [...row];
+        while (padded.length < totalCols) padded.push("");
+        return padded.map(escSemi).join(";");
+      }),
+    ];
+
+    const today = new Date();
+    const dateStr = `${String(today.getDate()).padStart(2, "0")}${String(today.getMonth() + 1).padStart(2, "0")}${today.getFullYear()}`;
+    const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${kurzl || "export"}_kategorien_${dateStr}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast({
+      title: lang === "DE" ? "Kategorien exportiert" : "Categories exported",
+      description: `${confirmedRows.length} ${lang === "DE" ? "Produkte" : "products"}`,
+    });
+  };
+
   const handleCategoryMapping = async () => {
-    // Group rows by unique product (name + color), same as processAndDownload
+    // Group rows by unique product (name + color)
     const groups: Record<string, ClothRow[]> = {};
     rows.forEach(row => {
       const name = getClothName(row).trim();
@@ -1780,7 +1829,6 @@ const Index = () => {
 
     setIsMapping(true);
     try {
-      // Build items list for AI
       const items = productKeys.map(key => {
         const [name, color] = key.split("|");
         const groupRows = groups[key];
@@ -1808,57 +1856,15 @@ const Index = () => {
 
       const results: { artikelnummer: string; categoryPath: string }[] = data.results;
 
-      // Build JTL category CSV rows
-      // Each product gets one row per hierarchy level:
-      // artikelnummer;Level1;Level2;Level3
-      const csvRows: string[][] = [];
-      let maxDepth = 0;
+      // Build preview rows
+      const previewRows: CategoryPreviewRow[] = results.map((r, idx) => ({
+        id: crypto.randomUUID(),
+        artikelnummer: r.artikelnummer || items[idx]?.artikelnummer || "",
+        categoryPath: (r.categoryPath || "").trim(),
+      }));
 
-      results.forEach((r, idx) => {
-        const an = r.artikelnummer || items[idx]?.artikelnummer || "";
-        const path = (r.categoryPath || "").trim();
-        if (!path) return;
-        const parts = path.split(" -> ").map(p => p.trim()).filter(Boolean);
-        maxDepth = Math.max(maxDepth, parts.length);
-        // One row per hierarchy level (cumulative)
-        for (let depth = 1; depth <= parts.length; depth++) {
-          csvRows.push([an, ...parts.slice(0, depth)]);
-        }
-      });
-
-      if (csvRows.length === 0) {
-        toast({ title: lang === "DE" ? "Keine Kategorien" : "No categories", variant: "destructive" });
-        return;
-      }
-
-      // Pad all rows to maxDepth + 1 columns (artikelnummer + maxDepth cat columns)
-      const totalCols = 1 + maxDepth;
-      const headers = ["Artikelnummer", ...Array.from({ length: maxDepth }, (_, i) => `cat${i + 1}`)];
-      const escSemi = (v: string) => (v.includes(";") || v.includes('"') ? `"${v.replace(/"/g, '""')}"` : v);
-
-      const lines = [
-        headers.map(escSemi).join(";"),
-        ...csvRows.map(row => {
-          const padded = [...row];
-          while (padded.length < totalCols) padded.push("");
-          return padded.map(escSemi).join(";");
-        }),
-      ];
-
-      const today = new Date();
-      const dateStr = `${String(today.getDate()).padStart(2, "0")}${String(today.getMonth() + 1).padStart(2, "0")}${today.getFullYear()}`;
-      const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${kurzl || "export"}_kategorien_${dateStr}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-
-      toast({
-        title: lang === "DE" ? "Kategorien exportiert" : "Categories exported",
-        description: `${results.length} ${lang === "DE" ? "Produkte klassifiziert" : "products classified"}`,
-      });
+      setCategoryPreviewRows(previewRows);
+      setCategoryPreviewOpen(true);
     } catch (err) {
       toast({
         title: lang === "DE" ? "Fehler" : "Error",
@@ -2513,6 +2519,13 @@ const Index = () => {
           setConfirmedTexts(map);
           processAndDownload(map);
         }}
+      />
+      <CategoryPreviewModal
+        open={categoryPreviewOpen}
+        onOpenChange={setCategoryPreviewOpen}
+        initialRows={categoryPreviewRows}
+        lang={lang}
+        onConfirm={exportCategoryCSV}
       />
     </div>
   );
