@@ -54,7 +54,7 @@ Respond ONLY with JSON, no markdown: {"classifications":[{"warengruppe":"...","f
 Use "" when no match. One entry per item in order.`;
 
     const bodyPayload = JSON.stringify({
-      model: 'gpt-4.1-mini',
+      model: 'gpt-4.1-nano',
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
       temperature: 0.2,
@@ -136,7 +136,7 @@ Examples:
       method: 'POST',
       headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'gpt-4.1-mini',
+        model: 'gpt-4.1-nano',
         messages: [{ role: 'user', content: prompt }],
         response_format: { type: 'json_object' },
         temperature: 0.1,
@@ -209,7 +209,7 @@ Respond ONLY with a JSON array of strings, same order, no markdown:
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'gpt-4.1-mini', messages: [{ role: 'user', content: prompt }], response_format: { type: 'json_object' }, temperature: 0.1 }),
+      body: JSON.stringify({ model: 'gpt-4.1-nano', messages: [{ role: 'user', content: prompt }], response_format: { type: 'json_object' }, temperature: 0.1 }),
     });
 
     if (!response.ok) {
