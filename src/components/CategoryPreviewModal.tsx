@@ -7,6 +7,8 @@ import { FindReplaceDialog } from "@/components/FindReplaceDialog";
 export interface CategoryPreviewRow {
   id: string;
   artikelnummer: string;
+  han: string;
+  barcode: string;
   categoryPath: string; // e.g. "Mode -> Kindermode 0 bis 5J -> T-Shirts & Tops"
 }
 

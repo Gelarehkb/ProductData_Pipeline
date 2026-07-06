@@ -1779,7 +1779,7 @@ const Index = () => {
       const parts = path.split(" -> ").map(p => p.trim()).filter(Boolean);
       maxDepth = Math.max(maxDepth, parts.length);
       for (let depth = 1; depth <= parts.length; depth++) {
-        csvRows.push([r.artikelnummer, ...parts.slice(0, depth)]);
+        csvRows.push([r.artikelnummer, r.han || "", r.barcode || "", ...parts.slice(0, depth)]);
       }
     });
 
@@ -1788,8 +1788,8 @@ const Index = () => {
       return;
     }
 
-    const totalCols = 1 + maxDepth;
-    const headers = ["Artikelnummer", ...Array.from({ length: maxDepth }, (_, i) => `cat${i + 1}`)];
+    const totalCols = 3 + maxDepth; // artikelnummer + han + barcode + cat columns
+    const headers = ["Artikelnummer", "HAN", "Barcode", ...Array.from({ length: maxDepth }, (_, i) => `cat${i + 1}`)];
     const lines = [
       headers.map(escSemi).join(";"),
       ...csvRows.map(row => {
@@ -1836,17 +1836,17 @@ const Index = () => {
     });
 
     // Rule 2: deduplicate by product name only — color/size variations share the same category
-    // Build one entry per unique product name; collect all color-variant artikelnummern
-    const nameGroups: Record<string, { first: ClothRow; artikelnummern: string[] }> = {};
+    // Build one entry per unique product name; collect all color-variant artikelnummern + their HAN/EAN
+    const nameGroups: Record<string, { first: ClothRow; variants: { artnr: string; han: string; barcode: string }[] }> = {};
     const artikelToName: Record<string, string> = {};
     filledRows.forEach(r => {
       const name = getClothName(r).trim();
       if (!name) return;
       const wg = r.WarenGruppe || "";
       const artnr = artikelnummerBuilder(kurzl, name, r.color || "", "", wg, aufSe);
-      if (!nameGroups[name]) nameGroups[name] = { first: r, artikelnummern: [] };
-      if (!nameGroups[name].artikelnummern.includes(artnr)) {
-        nameGroups[name].artikelnummern.push(artnr);
+      if (!nameGroups[name]) nameGroups[name] = { first: r, variants: [] };
+      if (!nameGroups[name].variants.find(v => v.artnr === artnr)) {
+        nameGroups[name].variants.push({ artnr, han: r.HAN || "", barcode: r.EAN || "" });
       }
       artikelToName[artnr] = name;
     });
@@ -1854,8 +1854,8 @@ const Index = () => {
     // Also include Vater-Artikel artikelnummer if vaterstat is on and there are multiple variants
     if (vaterstat) {
       Object.keys(nameGroups).forEach(name => {
-        const { first, artikelnummern } = nameGroups[name];
-        if (artikelnummern.length > 1) {
+        const { first, variants } = nameGroups[name];
+        if (variants.length > 1) {
           const wg = first.WarenGruppe || "";
           // Vater has same artikelnummer as first color variant in our builder (empty size/color slot)
           const vaterArtnr = artikelnummerBuilder(kurzl, name, first.color || "", "", wg, aufSe);
@@ -1955,13 +1955,13 @@ const Index = () => {
           : `${callsMade} AI calls · ${reuseCount} type-reuse · ${confirmedReuseCount} already confirmed · ${priceSkippedCount} skipped (VK<19)`,
       });
 
-      // Build preview rows: one row per color-variant artikelnummer, all sharing the name's category
+      // Build preview rows: one row per color-variant, all sharing the name's category
       const previewRows: CategoryPreviewRow[] = [];
       priceEligible.forEach(name => {
-        const { artikelnummern } = nameGroups[name];
+        const { variants } = nameGroups[name];
         const categoryPath = generatedCategoryMap[name] || "";
-        artikelnummern.forEach(artnr => {
-          previewRows.push({ id: crypto.randomUUID(), artikelnummer: artnr, categoryPath });
+        variants.forEach(({ artnr, han, barcode }) => {
+          previewRows.push({ id: crypto.randomUUID(), artikelnummer: artnr, han, barcode, categoryPath });
         });
       });
 
