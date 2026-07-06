@@ -45,11 +45,11 @@ function TreeNode({ node, fullPath, selected, onToggle, query, depth }: TreeNode
   const q = query.toLowerCase();
   const hasChildren = !!(node.children?.length);
   const visible = nodeMatchesQuery(node, fullPath, q);
-  const [expanded, setExpanded] = useState(depth === 0);
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
-    setExpanded(q ? true : depth === 0);
-  }, [q, depth]);
+    setExpanded(!!q);
+  }, [q]);
 
   if (!visible) return null;
 
@@ -117,9 +117,11 @@ function PickerContent({ currentPaths, onApply, onClose }: PickerContentProps) {
   }, []);
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Search */}
-      <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-border shrink-0">
+    // Explicit pixel height so the flex children can compute their share correctly
+    <div style={{ display: "flex", flexDirection: "column", height: "min(540px, 62vh)", overflow: "hidden" }}>
+
+      {/* Search — fixed height */}
+      <div style={{ flexShrink: 0 }} className="flex items-center gap-1.5 px-2 py-1.5 border-b border-border">
         <Search className="h-3.5 w-3.5 text-muted-foreground flex-none" />
         <Input
           autoFocus
@@ -130,8 +132,8 @@ function PickerContent({ currentPaths, onApply, onClose }: PickerContentProps) {
         />
       </div>
 
-      {/* Tree — fills all remaining space and scrolls */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden p-1">
+      {/* Tree — flex-1 + min-h-0 is required so it can shrink and scroll on macOS */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: "scroll", overflowX: "hidden", padding: "4px" }}>
         {CATEGORY_TREE.map(node => (
           <TreeNode
             key={node.name}
@@ -145,8 +147,8 @@ function PickerContent({ currentPaths, onApply, onClose }: PickerContentProps) {
         ))}
       </div>
 
-      {/* Footer */}
-      <div className="flex items-center justify-between gap-2 px-2 py-1.5 border-t border-border shrink-0">
+      {/* Footer — fixed height */}
+      <div style={{ flexShrink: 0 }} className="flex items-center justify-between gap-2 px-2 py-1.5 border-t border-border">
         <span className="text-xs text-muted-foreground">{selected.size} gewählt</span>
         <div className="flex gap-1.5">
           <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={onClose}>Abbrechen</Button>
