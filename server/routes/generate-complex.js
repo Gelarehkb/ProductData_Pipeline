@@ -50,11 +50,12 @@ HTML STRUCTURE
 <hr style="border:none;border-top:1px solid #e0e0e0;margin:10px 0;">
 <details><summary><strong>Materialien &amp; Verarbeitung</strong></summary><p class="bottom25">...</p></details>
 <hr style="border:none;border-top:1px solid #e0e0e0;margin:10px 0;">
-<details><summary><strong>Technische Daten &amp; Kompatibilit&auml;t</strong></summary><p class="bottom25">...</p></details>
+<details><summary><strong>Technische Daten &amp; Kompatibilit&auml;t</strong></summary><ul class="bottom25"><li>...</li><li>...</li></ul></details>
 <hr style="border:none;border-top:1px solid #e0e0e0;margin:10px 0;">
-<details><summary><strong>Lieferumfang</strong></summary><p class="bottom25">...</p></details>
+<details><summary><strong>Lieferumfang</strong></summary><ul class="bottom25"><li>...</li></ul></details>
 
 Füge nur Abschnitte hinzu, die für das Produkt sinnvoll sind. Halte die Abschnitte kurz und wiederhole dieselbe Information nicht in mehreren Abschnitten.
+Technische Daten, Kompatibilität und Lieferumfang immer als Bullet-Liste (<ul><li>) ausgeben, niemals als Fließtext-Absatz.
 Wenn das Produkt komplex genug ist, füge am Ende ein FAQ mit echten Elternfragen hinzu.
 
 FAQ-FORMAT
@@ -63,6 +64,13 @@ FAQ-FORMAT
 Halte die HTML-Ausgabe visuell konsistent mit dieser Struktur.
 
 CONTENT RULES
+- Nur bestätigte Fakten verwenden. Erfinde nichts.
+- Warm, direkt, geduzt (Du/Dir/Dein) – niemals "Sie"/"Ihr".
+- Übersetze jedes Merkmal in einen konkreten Nutzen für den Kunden statt es nur aufzuzählen (nicht "Material: Massivholz", sondern was das für den Kunden im Alltag bedeutet).
+- Jeder Abschnitt braucht einen erkennbaren roten Faden zum Produktnutzen, keine reine Faktenliste.
+- Keine generischen Textbausteine oder Floskeln, die auf jedes beliebige Produkt passen würden – jeder Text muss produktspezifisch klingen.
+- Ein leichter humorvoller Satz, wenn er natürlich passt.
+- Keine Superlative ohne Beleg.
 
   `;
 };

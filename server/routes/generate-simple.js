@@ -33,8 +33,8 @@ JSON-KEYS (alle Pflicht):
 "produkttext" | "html_de" | "meta_description" | "title_tag" | "suchbegriffe" | "farbe"
 
 OUTPUT RULES
-"html_de": kurz, mobil lesbar, 1–2 Absätze plus eine kurze Detail-Liste.
-"produkttext": derselbe Inhalt als Plaintext ohne HTML.
+"html_de": kurz, mobil lesbar, 1–2 Absätze plus eine kurze Bullet-Liste (<ul><li>) für technische Daten/Spezifikationen – niemals als Fließtext-Absatz.
+"produkttext": derselbe Inhalt als Plaintext ohne HTML, Bullet-Punkte als Zeilen mit "- ".
 "meta_description": 140–155 Zeichen, Nutzen plus eine relevante Spezifikation plus ein Vertrauenssignal.
 "title_tag": 50–60 Zeichen, Marke oder Kategorie vorne, keine Maße oder Zertifikate.
 "suchbegriffe": bis 240 Zeichen, Marke zuerst, nur treffende Substantive.
@@ -42,8 +42,10 @@ OUTPUT RULES
 
 GENERAL RULES
 - Nur bestätigte Fakten verwenden.
-- Wenn vorhanden, Material, Pflege, Zertifikate, Maße, Lieferumfang und limitierten Status nur kurz und nur kaufrelevant erwähnen.
-- Warm, direkt, geduzt, mit einem leichten humorvollen Satz, wenn er natürlich passt.
+- Wenn vorhanden, Material, Pflege, Zertifikate, Maße, Lieferumfang und limitierten Status als Bullet-Liste und nur kaufrelevant erwähnen.
+- Übersetze jedes Merkmal in einen konkreten Nutzen für den Kunden statt es nur aufzuzählen (nicht "Material: Massivholz", sondern was das für den Kunden im Alltag bedeutet).
+- Keine generischen Textbausteine oder Floskeln, die auf jedes beliebige Produkt passen würden – der Text muss produktspezifisch klingen.
+- Warm, direkt, geduzt (Du/Dir/Dein) – niemals "Sie"/"Ihr" – mit einem leichten humorvollen Satz, wenn er natürlich passt.
 - Keine Superlative ohne Beleg.
 
 `;

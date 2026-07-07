@@ -27,12 +27,15 @@ async function apiFetch(fn: string, body: object) {
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+type Mode = "simple" | "complex";
+
 interface TextRow {
   id: string;
   han: string;
   artikelnummer: string;
   artikelname: string;
   beschreibung: string;
+  mode: Mode;
   produkttext: string;
   Title_Tag: string;
   html_de: string;
@@ -67,6 +70,7 @@ const COLUMNS: {
   { key: "artikelnummer",    labelDE: "Artikelnummer",     labelEN: "Article No.",      width: 160, isOutput: false },
   { key: "artikelname",      labelDE: "Artikelname",       labelEN: "Item Name",        width: 200, isOutput: false },
   { key: "beschreibung",     labelDE: "Beschreibung",      labelEN: "Description",      width: 260, isOutput: false },
+  { key: "mode",             labelDE: "Modus",             labelEN: "Mode",             width: 150, isOutput: false },
   { key: "produkttext",      labelDE: "Produkttext",       labelEN: "Product Text",     width: 260, isOutput: true  },
   { key: "Title_Tag",        labelDE: "Title Tag",         labelEN: "Title Tag",        width: 200, isOutput: true  },
   { key: "html_de",          labelDE: "HTML (DE)",         labelEN: "HTML (DE)",        width: 280, isOutput: true  },
@@ -74,11 +78,43 @@ const COLUMNS: {
   { key: "suchbegriffe",     labelDE: "Suchbegriffe",      labelEN: "Search Terms",     width: 180, isOutput: true  },
 ];
 
-const createEmptyRow = (): TextRow => ({
+const createEmptyRow = (mode: Mode = "complex"): TextRow => ({
   id: crypto.randomUUID(),
-  han: "", artikelnummer: "", artikelname: "", beschreibung: "",
+  han: "", artikelnummer: "", artikelname: "", beschreibung: "", mode,
   produkttext: "", Title_Tag: "", html_de: "", meta_description: "", suchbegriffe: "",
 });
+
+const normalizeMode = (v: string): Mode => (v.trim().toLowerCase().startsWith("s") ? "simple" : "complex");
+
+// ---------------------------------------------------------------------------
+// Mode swatch (segmented toggle)
+// ---------------------------------------------------------------------------
+function ModeSwatch({ value, onChange, lang, xs = false }: { value: Mode; onChange: (m: Mode) => void; lang: "DE" | "EN"; xs?: boolean }) {
+  const labels: Record<Mode, string> = {
+    simple: lang === "DE" ? "Einfach" : "Simple",
+    complex: lang === "DE" ? "Komplex" : "Complex",
+  };
+  return (
+    <div className="inline-flex rounded-md border border-border overflow-hidden shrink-0" onMouseDown={e => e.stopPropagation()}>
+      {(["simple", "complex"] as Mode[]).map(m => (
+        <button
+          key={m}
+          type="button"
+          onClick={() => onChange(m)}
+          className={`font-medium transition-colors ${xs ? "px-1.5 py-0.5 text-[10px]" : "px-2 py-1 text-xs"} ${
+            value === m
+              ? m === "simple"
+                ? "bg-emerald-500 text-white"
+                : "bg-indigo-500 text-white"
+              : "bg-muted text-muted-foreground hover:bg-muted/70"
+          }`}
+        >
+          {labels[m]}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Selection range helper
@@ -138,7 +174,8 @@ export default function TextGenerator() {
   const [lang, setLang] = useState<"DE" | "EN">("DE");
   const [hersteller, setHersteller] = useState("");
   const [rowCountInput, setRowCountInput] = useState("10");
-  const [rows, setRows] = useState<TextRow[]>(() => Array.from({ length: 10 }, createEmptyRow));
+  const [defaultMode, setDefaultMode] = useState<Mode>("complex");
+  const [rows, setRows] = useState<TextRow[]>(() => Array.from({ length: 10 }, () => createEmptyRow("complex")));
   const [history, setHistory] = useState<TextRow[][]>([]);
   const [generating, setGenerating] = useState(false);
 
@@ -159,10 +196,10 @@ export default function TextGenerator() {
   const applyRowCount = useCallback((count: number) => {
     setRows(prev => {
       if (prev.length === count) return prev;
-      if (prev.length < count) return [...prev, ...Array.from({ length: count - prev.length }, createEmptyRow)];
+      if (prev.length < count) return [...prev, ...Array.from({ length: count - prev.length }, () => createEmptyRow(defaultMode))];
       return prev.slice(0, count);
     });
-  }, []);
+  }, [defaultMode]);
 
   const applyRowCountInput = () => {
     const n = Math.max(1, Math.min(200, parseInt(rowCountInput, 10) || rows.length));
@@ -180,6 +217,18 @@ export default function TextGenerator() {
       lastEditedCellRef.current = { id, field };
     }
     setRows(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
+  }, [rows]);
+
+  const handleModeChange = useCallback((id: string, mode: Mode) => {
+    setHistory(prev => [...prev.slice(-49), rows]);
+    lastEditedCellRef.current = null;
+    setRows(prev => prev.map(r => r.id === id ? { ...r, mode } : r));
+  }, [rows]);
+
+  const handleDefaultModeChange = useCallback((mode: Mode) => {
+    setDefaultMode(mode);
+    setHistory(prev => [...prev.slice(-49), rows]);
+    setRows(prev => prev.map(r => ({ ...r, mode })));
   }, [rows]);
 
   // ---------------------------------------------------------------------------
@@ -308,12 +357,13 @@ export default function TextGenerator() {
       const next = [...prev];
       matrix.forEach((cells, i) => {
         const targetRow = rowIndex + i;
-        while (targetRow >= next.length) next.push(createEmptyRow());
+        while (targetRow >= next.length) next.push(createEmptyRow(defaultMode));
         const updated = { ...next[targetRow] };
         cells.forEach((val, j) => {
           const targetCol = colIndex + j;
           if (targetCol < COLUMNS.length) {
-            (updated as any)[COLUMNS[targetCol].key] = val.trim();
+            const k = COLUMNS[targetCol].key;
+            (updated as any)[k] = k === "mode" ? normalizeMode(val) : val.trim();
           }
         });
         next[targetRow] = updated;
@@ -368,11 +418,14 @@ export default function TextGenerator() {
         const next = [...prev];
         matrix.forEach((cells, i) => {
           const targetRow = minRow + i;
-          while (targetRow >= next.length) next.push(createEmptyRow());
+          while (targetRow >= next.length) next.push(createEmptyRow(defaultMode));
           const updated = { ...next[targetRow] };
           cells.forEach((val, j) => {
             const targetCol = minCol + j;
-            if (targetCol < COLUMNS.length) (updated as any)[COLUMNS[targetCol].key] = val.trim();
+            if (targetCol < COLUMNS.length) {
+              const k = COLUMNS[targetCol].key;
+              (updated as any)[k] = k === "mode" ? normalizeMode(val) : val.trim();
+            }
           });
           next[targetRow] = updated;
         });
@@ -382,7 +435,7 @@ export default function TextGenerator() {
     } catch {
       toast({ title: lang === "DE" ? "Fehler" : "Error", description: lang === "DE" ? "Kein Zugriff auf Zwischenablage." : "No clipboard access.", variant: "destructive" });
     }
-  }, [selection, rows, lang, toast]);
+  }, [selection, rows, lang, toast, defaultMode]);
 
   const handleDeleteSelection = useCallback(() => {
     if (selection.length === 0) return;
@@ -495,26 +548,51 @@ export default function TextGenerator() {
     }
     setHistory(prev => [...prev.slice(-49), rows]);
     setGenerating(true);
-    const { data, error } = await apiFetch("generate-online-texts-complex", {
-      items: eligible.map(({ r }) => ({
-        artikelname: r.artikelname,
-        markenname: hersteller,
-        beschreibung: r.beschreibung,
-        warengruppe: "",
-      })),
-    });
+
+    type GenResult = { produkttext?: string; Title_Tag?: string; html_de?: string; meta_description?: string; suchbegriffe?: string; error?: string };
+    type GenResponse = { data: { results: GenResult[] } | null; error: Error | null };
+
+    const byMode: Record<Mode, { r: TextRow; i: number }[]> = {
+      simple: eligible.filter(({ r }) => r.mode === "simple"),
+      complex: eligible.filter(({ r }) => r.mode !== "simple"),
+    };
+    const endpoints: Record<Mode, string> = {
+      simple: "generate-online-texts-simple",
+      complex: "generate-online-texts-complex",
+    };
+
+    const fetchForMode = async (mode: Mode): Promise<GenResponse> => {
+      if (byMode[mode].length === 0) return { data: { results: [] }, error: null };
+      const res = await apiFetch(endpoints[mode], {
+        items: byMode[mode].map(({ r }) => ({
+          artikelname: r.artikelname,
+          markenname: hersteller,
+          beschreibung: r.beschreibung,
+          warengruppe: "",
+        })),
+      });
+      return res as GenResponse;
+    };
+
+    const [simpleRes, complexRes] = await Promise.all([fetchForMode("simple"), fetchForMode("complex")]);
     setGenerating(false);
-    if (error || !data) {
-      toast({ title: lang === "DE" ? "Fehler" : "Error", description: error?.message ?? "Unknown error", variant: "destructive" });
+
+    const resByMode: Record<Mode, GenResponse> = { simple: simpleRes, complex: complexRes };
+    const firstError = resByMode.simple.error || resByMode.complex.error;
+    if (firstError) {
+      toast({ title: lang === "DE" ? "Fehler" : "Error", description: firstError.message ?? "Unknown error", variant: "destructive" });
       return;
     }
-    const results = (data as { results: { produkttext?: string; Title_Tag?: string; html_de?: string; meta_description?: string; suchbegriffe?: string; error?: string }[] }).results;
+
     setRows(prev => {
       const next = [...prev];
-      eligible.forEach(({ i }, idx) => {
-        const res = results[idx];
-        if (!res || res.error) return;
-        next[i] = { ...next[i], produkttext: res.produkttext ?? "", Title_Tag: res.Title_Tag ?? "", html_de: res.html_de ?? "", meta_description: res.meta_description ?? "", suchbegriffe: res.suchbegriffe ?? "" };
+      (["simple", "complex"] as Mode[]).forEach(mode => {
+        const results = resByMode[mode].data?.results ?? [];
+        byMode[mode].forEach(({ i }, idx) => {
+          const res = results[idx];
+          if (!res || res.error) return;
+          next[i] = { ...next[i], produkttext: res.produkttext ?? "", Title_Tag: res.Title_Tag ?? "", html_de: res.html_de ?? "", meta_description: res.meta_description ?? "", suchbegriffe: res.suchbegriffe ?? "" };
+        });
       });
       return next;
     });
@@ -582,6 +660,13 @@ export default function TextGenerator() {
             placeholder="z.B. SNUG"
             className="h-7 text-sm w-40"
           />
+        </div>
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          <Label className="text-xs text-muted-foreground whitespace-nowrap">
+            {lang === "DE" ? "Prompt für alle" : "Prompt for all"}
+          </Label>
+          <ModeSwatch value={defaultMode} onChange={handleDefaultModeChange} lang={lang} />
         </div>
 
         <Button size="sm" className="gap-1.5 h-7 text-xs shrink-0" onClick={handleGenerate} disabled={generating}>
@@ -704,23 +789,29 @@ export default function TextGenerator() {
                       onMouseEnter={() => handleCellMouseEnter(rowIdx, colIdx)}
                       onMouseUp={() => { if (fillHandleDrag) { /* handled by global */ } }}
                     >
-                      <input
-                        type="text"
-                        value={value}
-                        data-row={rowIdx}
-                        data-col={colIdx}
-                        onChange={e => handleCellChange(row.id, col.key, e.target.value)}
-                        onPaste={e => handleCellPaste(e, rowIdx, colIdx, col.key)}
-                        onKeyDown={e => handleKeyNavigation(e, rowIdx, colIdx)}
-                        onFocus={() => {
-                          if (!selection.some(s => s.row === rowIdx && s.col === colIdx)) {
-                            setSelection([{ row: rowIdx, col: colIdx }]);
-                            setSelectionStart({ row: rowIdx, col: colIdx });
-                          }
-                        }}
-                        className="w-full px-2 py-1.5 bg-transparent border-none outline-none focus:ring-2 focus:ring-primary/50 text-sm"
-                        style={{ minWidth: 0 }}
-                      />
+                      {col.key === "mode" ? (
+                        <div className="w-full h-full px-2 py-1.5 flex items-center" data-row={rowIdx} data-col={colIdx}>
+                          <ModeSwatch value={row.mode} onChange={m => handleModeChange(row.id, m)} lang={lang} xs />
+                        </div>
+                      ) : (
+                        <input
+                          type="text"
+                          value={value}
+                          data-row={rowIdx}
+                          data-col={colIdx}
+                          onChange={e => handleCellChange(row.id, col.key, e.target.value)}
+                          onPaste={e => handleCellPaste(e, rowIdx, colIdx, col.key)}
+                          onKeyDown={e => handleKeyNavigation(e, rowIdx, colIdx)}
+                          onFocus={() => {
+                            if (!selection.some(s => s.row === rowIdx && s.col === colIdx)) {
+                              setSelection([{ row: rowIdx, col: colIdx }]);
+                              setSelectionStart({ row: rowIdx, col: colIdx });
+                            }
+                          }}
+                          className="w-full px-2 py-1.5 bg-transparent border-none outline-none focus:ring-2 focus:ring-primary/50 text-sm"
+                          style={{ minWidth: 0 }}
+                        />
+                      )}
 
                       {/* Fill handle (black cube) */}
                       {value && rowIdx < rows.length - 1 && (
@@ -743,7 +834,7 @@ export default function TextGenerator() {
                 colSpan={COLUMNS.length + 1}
                 className="border border-[hsl(0,0%,85%)] px-3 py-1 text-center cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/30 text-xs transition-colors select-none"
                 onClick={() => {
-                  setRows(prev => [...prev, createEmptyRow()]);
+                  setRows(prev => [...prev, createEmptyRow(defaultMode)]);
                   setRowCountInput(String(rows.length + 1));
                 }}
               >
