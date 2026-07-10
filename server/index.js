@@ -22,6 +22,155 @@ const FARBE = ["beige","blau","braun","gelb","grau","grün","mehrfärbig","orang
 const ART = ["Accessories","Aufbewahrung","Babyspielsachen","Babywippe","Baden","Beißen","Beleuchtung","Betten","Bettwäsche","Bewegung","Bodies","Cardigans","Care","Decken","Deko","Einzelkinderwagen","Essen","Fahren","Fußsäcke","Geschwisterkinderwagen","Große Spielsachen","Gutscheine","Handschuhe","Hauben","Hochstühle","Holzspielzeug","Hosen","Hüte","Jacken","Autositze","Kinderwagen","Kinderwagen Einzelteil","Kissen","Kleider","Kniestrümpfe","Kommoden","Kurze Hosen","Kuscheltiere","Lätzchen","Leggings","Lernen","Matratzen","Modellbahn","Musik","Nestchen","Overalls","Pullover","Puppen","Pyjamas","Regale","Röcke","Schals","Schlafsäcke","Schnuller","Schränke","Schuhe","Schwimmbekleidung","Socken","Spiele","Spielen","Stillen","Stofftiere","Stoffwindeln","Strampler","Stühle","Sweatshirts","Taschen","Tattoos","Teppich","Teppiche","Tische","Tops","Tragen","Trinken","T-Shirts","Waschen","Wickeltaschen","Wickelunterlagen","Wiegen","Zubehör"];
 const GROESSE = ["50 cm (0M)","62 cm (0-3M)","68 cm (3-6M)","74 cm (6-9M)","80 cm (9-12M)","86 cm (12-18M)","92 cm (2J)","98 cm (3J)","104 cm (4J)","110 cm (5J)","116 cm (6J)","120 cm (6J)","128 cm (6J)"];
 
+// ── classify-products helpers ──────────────────────────────────────────────────
+
+const WARENGRUPPE_SET = new Set(WARENGRUPPE);
+const FARBE_SET = new Set(FARBE);
+const ART_SET = new Set(ART);
+const GROESSE_SET = new Set(GROESSE);
+
+function validateClassification(c) {
+  return {
+    warengruppe: WARENGRUPPE_SET.has(c?.warengruppe) ? c.warengruppe : '',
+    farbe:       FARBE_SET.has(c?.farbe)             ? c.farbe       : '',
+    art:         ART_SET.has(c?.art)                 ? c.art         : '',
+    groesse:     GROESSE_SET.has(c?.groesse)          ? c.groesse     : '',
+  };
+}
+
+async function classifyChunk(items, sizes, apiKey) {
+  const prompt = `You are a strict product classifier for a children's store (Austria/Germany).
+
+CRITICAL RULES — violating any rule is a failure:
+1. Every field must be EXACTLY one string from the allowed list, or "" if no match.
+2. NEVER invent values. NEVER use synonyms. Copy the exact string from the list.
+3. Classify based on what the product IS — not what surrounds it in the order.
+4. You must return exactly ${items.length} entries in the same order as the input.
+
+═══ ALLOWED VALUES ═══
+
+Warengruppe (pick ONE or ""):
+${WARENGRUPPE.join(' | ')}
+
+Farbe (pick ONE or ""):
+${FARBE.join(' | ')}
+
+Art (pick ONE or ""):
+${ART.join(' | ')}
+
+Größe (pick ONE or ""):
+${GROESSE.join(' | ')}
+
+═══ CLASSIFICATION GUIDE ═══
+
+WARENGRUPPE — mandatory, almost always has a match:
+• Ball, Spielzeug, Puzzle, Lernspiel, Kuscheltier, Puppe, Holzspielzeug → "Spielzeug Kind"
+• Rasseln, Beißringe, Babyspielzeug (0-12M) → "Spielzeug Baby"
+• Spielzeug 1-3J, Lauflernhilfe, Babywippe → "Spielzeug Kleinkind"
+• T-Shirt, Body, Strampler, Socken, Unterwäsche, Basis-Kleidung → "Kleidung Basics"
+• Regenjacke, Fleece, Schneehose, Outdoorjacke, Funktionskleidung → "Kleidung Funktion"
+• Kleid, modische Jacke, Hose (Mode), Pullover, Cardigan → "Kleidung Mode"
+• Schuhe, Stiefel, Sandalen, Hausschuhe, Sneaker → "Schuhe"
+• Mütze, Handschuhe, Schal, Sonnenhut, Stirnband → "Accessoires"
+• Rucksack, Tasche, Wickeltasche, Turnbeutel → "Taschen"
+• Kinderwagen, Buggy, Bugaboo, Cybex, Stokke → "Fahren"
+• Fahrrad, Laufrad, Roller, Scooter → "Fahrräder"
+• Tragehilfe, Babytrage, Sling, Manduca → "Tragen"
+• Bett, Wickelkommode, Regal, Kleiderschrank, Schreibtisch → "Möbel"
+• Kinderzimmer-Deko, Lampe, Teppich, Kissen → "KiWa" or "KiWa Zubehör"
+• Pflege, Creme, Shampoo, Badezubehör → "Care"
+• Buch, Hörspiel, Tonie, DVD → "Medien"
+• Schüssel, Teller, Trinkflasche, Besteck → "Homeware"
+• Babynahrung, Snack → "Essen/Trinken"
+• Autositz, Kindersitz → "Fahren"
+• Gutschein → "Gutscheine"
+
+ART — mandatory, pick the most specific match:
+• Ball, Spielzeug (generic) → "Spielen"
+• Kuscheltier → "Kuscheltiere" | Stofftier → "Stofftiere" | Puppe → "Puppen"
+• Holzspielzeug → "Holzspielzeug" | Puzzle/Brettspiel → "Spiele" | Musik → "Musik"
+• Babyspielsachen (Rassel, Beißring, Mobile) → "Babyspielsachen"
+• T-Shirt, Top → "T-Shirts" | Sweatshirt → "Sweatshirts" | Pullover/Sweater → "Pullover"
+• Jacke/Jacket → "Jacken" | Cardigan/Strickjacke → "Cardigans"
+• Hose/Pants/Trousers → "Hosen" | Shorts/Kurze Hose → "Kurze Hosen" | Leggings → "Leggings"
+• Kleid/Dress → "Kleider" | Rock/Skirt → "Röcke"
+• Body/Bodysuit → "Bodies" | Strampler/Romper → "Strampler" | Overall → "Overalls"
+• Pyjama/Schlafanzug → "Pyjamas" | Schlafsack (Baby) → "Schlafsäcke"
+• Schuhe/Shoes → "Schuhe" | Socken/Socks → "Socken" | Kniestrümpfe → "Kniestrümpfe"
+• Mütze/Hat/Beanie → "Hauben" | Sonnenhut/Cap → "Hüte" | Schal/Scarf → "Schals" | Handschuhe/Gloves → "Handschuhe"
+• Rucksack/Backpack → "Taschen" | Tasche/Bag → "Taschen" | Wickeltasche → "Wickeltaschen"
+• Kinderwagen (Einzel) → "Einzelkinderwagen" | Geschwisterwagen → "Geschwisterkinderwagen"
+• Autositz/Autokindersitz → "Autositze" | Fußsack/Footmuff → "Fußsäcke"
+• Decke/Blanket → "Decken" | Bettwäsche → "Bettwäsche" | Nestchen → "Nestchen"
+• Bett/Crib/Gitterbett → "Betten" | Wiege → "Wiegen" | Matratze → "Matratzen"
+• Kommode/Wickelkommode → "Kommoden" | Regal → "Regale" | Schrank → "Schränke"
+• Tisch → "Tische" | Stuhl/Chair → "Stühle" | Hochstuhl → "Hochstühle"
+• Schnuller/Pacifier → "Schnuller" | Lätzchen/Bib → "Lätzchen" | Stoffwindel → "Stoffwindeln"
+• Schwimmanzug/Badehose → "Schwimmbekleidung"
+• Teppich → "Teppiche" | Kissen → "Kissen" | Lampe/Nachtlicht → "Beleuchtung"
+• Trinkflasche/Becher → "Trinken" | Teller/Schüssel → "Essen"
+
+FARBE — only if color is explicitly named in the product name:
+pink/rose→rosa | blue/blau→blau | red/rot→rot | green/grün→grün | white/weiß→weiß
+black/schwarz→schwarz | grey/gray/grau→grau | brown/braun→braun | yellow/gelb→gelb
+purple/violet/lila→violett | turquoise/türkis→türkis | orange→orange | beige→beige
+navy→blau | multicolor/bunt/mehrfärbig→mehrfärbig | sand/cream/ivory/stone→beige
+Leave "" if no color word in name.
+
+GRÖßE — only if a size code appears in the name:
+Match to closest: 50→"50 cm (0M)" | 62→"62 cm (0-3M)" | 68→"68 cm (3-6M)"
+74→"74 cm (6-9M)" | 80→"80 cm (9-12M)" | 86→"86 cm (12-18M)" | 92→"92 cm (2J)"
+98→"98 cm (3J)" | 104→"104 cm (4J)" | 110→"110 cm (5J)" | 116→"116 cm (6J)"
+128→"128 cm (6J)" | T1→"86 cm (12-18M)" | T2→"92 cm (2J)" | T3→"98 cm (3J)"
+Leave "" if no size in name.
+
+═══ ITEMS TO CLASSIFY ═══
+${items.map((item, i) => `${i + 1}. ${item}${sizes[i] ? ` [Größe im Namen: ${sizes[i]}]` : ''}`).join('\n')}
+
+Respond ONLY with valid JSON (no markdown):
+{"classifications":[{"warengruppe":"...","farbe":"...","art":"...","groesse":"..."},...]}
+Exactly ${items.length} entries, same order as input. Use "" for no match.`;
+
+  let response = null;
+  let lastErr = '';
+  for (let attempt = 0; attempt < 3; attempt++) {
+    response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: 'gpt-4.1',
+        messages: [{ role: 'user', content: prompt }],
+        response_format: { type: 'json_object' },
+        temperature: 0,
+      }),
+    });
+    if (response.ok) break;
+    lastErr = await response.text();
+    if (response.status === 503 || response.status === 429) {
+      await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+      continue;
+    }
+    break;
+  }
+
+  if (!response || !response.ok) throw new Error(`OpenAI API error [${response?.status ?? 500}]: ${lastErr}`);
+
+  const data = await response.json();
+  let content = data?.choices?.[0]?.message?.content || '';
+  content = content.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
+
+  const parsed = JSON.parse(content);
+  const raw = Array.isArray(parsed) ? parsed : parsed.classifications;
+  if (!Array.isArray(raw)) throw new Error('Missing classifications array');
+
+  // Validate every value against the allowed lists — bad values become ""
+  const validated = raw.map(validateClassification);
+
+  // Pad to chunk length in case AI returned fewer
+  while (validated.length < items.length) validated.push({ warengruppe: '', farbe: '', art: '', groesse: '' });
+  return validated.slice(0, items.length);
+}
+
 // ── classify-products ──────────────────────────────────────────────────────────
 app.post('/api/classify-products', async (req, res) => {
   try {
@@ -32,68 +181,18 @@ app.post('/api/classify-products', async (req, res) => {
     const sizes = req.body.sizes ? req.body.sizes.map(s => s ? s.toLowerCase().replace(/\s+/g, '') : '') : [];
     if (!items || !Array.isArray(items) || items.length === 0) throw new Error('items array is required');
 
-    const prompt = `You are a product classifier for a children's clothing and accessories store.
-
-For each item, choose the BEST matching value from each list. Use ONLY values from these exact lists.
-
-Warengruppe: ${JSON.stringify(WARENGRUPPE)}
-Farbe: ${JSON.stringify(FARBE)}
-Art: ${JSON.stringify(ART)}
-Größe: ${JSON.stringify(GROESSE)}
-
-Rules:
-- Farbe: extract color from name (pink→rosa, blue→blau, red→rot, green→grün, white→weiß, black→schwarz, grey/gray→grau, brown→braun, yellow→gelb, purple→violett, turquoise→türkis, multicolor/bunt→mehrfärbig). Leave empty if no color found.
-- Größe: match size in brackets to closest cm value (e.g. 62→"62 cm (0-3M)", 86→"86 cm (12-18M)"). T1→"86 cm (12-18M)", T2→"92 cm (2J)". Leave empty if no size.
-- Art: match product type (t-shirt→T-Shirts, jacket→Jacken, pants→Hosen, dress→Kleider, shoes→Schuhe, socks→Socken, body/bodysuit→Bodies, overall→Overalls, leggings→Leggings, pullover/sweater→Pullover, cardigan→Cardigans, sweatshirt→Sweatshirts, shorts→Kurze Hosen, romper/strampler→Strampler, pajama→Pyjamas, scarf→Schals, gloves→Handschuhe, bag→Taschen, toy→Spielen, blanket→Decken, sleeping bag→Schlafsäcke).
-- Warengruppe: choose the broader product group.
-
-Items:
-${items.map((item, i) => `${i + 1}. ${item}${sizes[i] ? ` [Size: ${sizes[i]}]` : ''}`).join('\n')}
-
-Respond ONLY with JSON, no markdown: {"classifications":[{"warengruppe":"...","farbe":"...","art":"...","groesse":"..."},...]}
-Use "" when no match. One entry per item in order.`;
-
-    const bodyPayload = JSON.stringify({
-      model: 'gpt-4.1-nano',
-      messages: [{ role: 'user', content: prompt }],
-      response_format: { type: 'json_object' },
-      temperature: 0.2,
-    });
-
-    let response = null;
-    let lastErr = '';
-    for (let attempt = 0; attempt < 3; attempt++) {
-      response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${OPENAI_API_KEY}` },
-        body: bodyPayload,
-      });
-      if (response.ok) break;
-      lastErr = await response.text();
-      if (response.status === 503 || response.status === 429) {
-        await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
-        continue;
-      }
-      break;
+    // Chunk into batches of 20 and process in parallel — prevents truncation on large orders
+    const CHUNK = 20;
+    const chunks = [];
+    for (let i = 0; i < items.length; i += CHUNK) {
+      chunks.push({ items: items.slice(i, i + CHUNK), sizes: sizes.slice(i, i + CHUNK) });
     }
 
-    if (!response || !response.ok) {
-      throw new Error(`OpenAI API error [${response?.status ?? 500}]: ${lastErr}`);
-    }
+    const chunkResults = await Promise.all(
+      chunks.map(c => classifyChunk(c.items, c.sizes, OPENAI_API_KEY))
+    );
 
-    const data = await response.json();
-    let content = data?.choices?.[0]?.message?.content || '';
-    content = content.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
-
-    let classifications;
-    try {
-      const parsed = JSON.parse(content);
-      classifications = Array.isArray(parsed) ? parsed : parsed.classifications;
-      if (!Array.isArray(classifications)) throw new Error('Missing classifications array');
-    } catch {
-      throw new Error('AI returned invalid JSON');
-    }
-
+    const classifications = chunkResults.flat();
     res.json({ classifications });
   } catch (error) {
     console.error('classify-products error:', error);
