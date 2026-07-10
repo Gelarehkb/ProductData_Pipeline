@@ -614,6 +614,7 @@ const Index = () => {
   const tableRef = useRef<HTMLTableElement>(null);
   const [findReplaceOpen, setFindReplaceOpen] = useState(false);
   const [isClassifying, setIsClassifying] = useState(false);
+  const [isRetrying, setIsRetrying] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
   const [isMapping, setIsMapping] = useState(false);
   const [categoryPreviewOpen, setCategoryPreviewOpen] = useState(false);
@@ -683,6 +684,56 @@ const Index = () => {
       toast({ title: t("classifyError", lang), description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
     } finally {
       setIsClassifying(false);
+    }
+  };
+
+  // Retry: re-classify only rows that are incomplete (missing WarenGruppe or Art)
+  const handleAIClassifyRetry = async () => {
+    const incompleteRows = rows.filter(r =>
+      getClothName(r).trim() !== "" && (!r.WarenGruppe || !r.MerkmaleArt)
+    );
+    if (incompleteRows.length === 0) {
+      toast({ title: lang === "DE" ? "Nichts zu wiederholen" : "Nothing to retry", description: lang === "DE" ? "Alle Zeilen sind bereits klassifiziert." : "All rows are already classified." });
+      return;
+    }
+    setIsRetrying(true);
+    try {
+      const itemNames = incompleteRows.map(r => [getClothName(r), r.color].filter(Boolean).join(" ").trim());
+      const itemSizes = incompleteRows.map(r => r.Size || "");
+
+      const { data, error } = await apiFetch('classify-products', { items: itemNames, sizes: itemSizes });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      const classifications = data?.classifications;
+      if (!Array.isArray(classifications)) throw new Error("Invalid response");
+
+      setHistory(prev => [...prev.slice(-49), rows]);
+      setRows(prev => {
+        const newRows = [...prev];
+        let classIdx = 0;
+        newRows.forEach((row, i) => {
+          if (getClothName(row).trim() !== "" && (!row.WarenGruppe || !row.MerkmaleArt) && classIdx < classifications.length) {
+            const c = classifications[classIdx];
+            newRows[i] = {
+              ...row,
+              WarenGruppe: c.warengruppe || row.WarenGruppe,
+              MerkmaleFarbe: c.farbe || mapColorToMerkmaleFarbe(row.color, merkmaleFarbeOptions) || row.MerkmaleFarbe || "",
+              MerkmaleArt: c.art || row.MerkmaleArt || "",
+              MerkmaleGroesse: c.groesse || mapSizeToMerkmaleGroesse(row.Size, merkmaleGroesseOptions) || row.MerkmaleGroesse || "",
+            };
+            classIdx++;
+          }
+        });
+        return newRows;
+      });
+
+      toast({ title: lang === "DE" ? "Nachklassifiziert" : "Retry done", description: `${incompleteRows.length} ${lang === "DE" ? "unvollständige Zeilen aktualisiert." : "incomplete rows updated."}` });
+    } catch (err) {
+      console.error("Retry classification error:", err);
+      toast({ title: t("classifyError", lang), description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
+    } finally {
+      setIsRetrying(false);
     }
   };
 
@@ -2681,10 +2732,28 @@ const Index = () => {
           <div className="w-px h-5 bg-border" />
 
           {/* ── AI tools ── */}
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={handleAIClassify} disabled={isClassifying}>
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={handleAIClassify} disabled={isClassifying || isRetrying}>
             {isClassifying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
             {isClassifying ? t("aiClassifying", lang) : t("aiClassify", lang)}
           </Button>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="px-2"
+                  onClick={handleAIClassifyRetry}
+                  disabled={isClassifying || isRetrying}
+                >
+                  {isRetrying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {lang === "DE" ? "Unvollständige neu klassifizieren" : "Retry incomplete rows"}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
       </div>
       <ImportDialog open={importDialogOpen} onOpenChange={setImportDialogOpen} onImport={handleImportRows} lang={lang} />
