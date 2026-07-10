@@ -6,7 +6,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Switch } from "@/components/ui/switch";
-import { Download, Trash2, ClipboardPaste, Undo2, Sparkles, Loader2, Globe, Plus, Upload, FolderTree, Eye } from "lucide-react";
+import { Download, Trash2, ClipboardPaste, Undo2, Sparkles, Loader2, Globe, Plus, Upload, FolderTree, Eye, RotateCcw } from "lucide-react";
 import { MerkmaleMultiSelect } from "@/components/MerkmaleMultiSelect";
 import { useToast } from "@/hooks/use-toast";
 import { FindReplaceDialog } from "@/components/FindReplaceDialog";
@@ -539,6 +539,26 @@ const Index = () => {
     });
     toast({ title: "Import abgeschlossen", description: `${imported.length} Zeilen importiert.` });
   }, [toast]);
+
+  const handleClearData = useCallback(() => {
+    const count = Math.max(1, parseInt(rowCount, 10) || 10);
+    setRows(Array.from({ length: count }, () => createEmptyRow()));
+    setHistory([]);
+    setDiscount("");
+    setSelection([]);
+    setSelectionStart(null);
+    setHanFixed({});
+    setTextGenerating(false);
+    setTextPreviewRows([]);
+    setConfirmedTexts({});
+    setTextPreviewOpen(false);
+    setKategorienToggle(false);
+    setCategoryPreviewRows([]);
+    setConfirmedCategories({});
+    setCategoryArtikelToName({});
+    setCategoryPreviewOpen(false);
+    toast({ title: lang === "DE" ? "Daten geleert" : "Data cleared", description: lang === "DE" ? "Alle eingefügten Inhalte wurden entfernt." : "All pasted content has been removed." });
+  }, [rowCount, lang, toast]);
 
 
 
@@ -2132,6 +2152,15 @@ const Index = () => {
             <Button onClick={() => setImportDialogOpen(true)} variant="outline" size="sm" className="gap-1.5">
               <Upload className="h-4 w-4" />
               {lang === "DE" ? "Datei importieren" : "Import file"}
+            </Button>
+            <Button
+              onClick={handleClearData}
+              variant="outline"
+              size="sm"
+              className="gap-1.5 text-muted-foreground hover:text-destructive hover:border-destructive/50"
+            >
+              <RotateCcw className="h-4 w-4" />
+              {lang === "DE" ? "Daten leeren" : "Clear data"}
             </Button>
           </div>
           <div className="flex items-center gap-2">
