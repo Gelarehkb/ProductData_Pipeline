@@ -540,26 +540,6 @@ const Index = () => {
     toast({ title: "Import abgeschlossen", description: `${imported.length} Zeilen importiert.` });
   }, [toast]);
 
-  const handleClearData = useCallback(() => {
-    const count = Math.max(1, parseInt(rowCount, 10) || 10);
-    setRows(Array.from({ length: count }, () => createEmptyRow()));
-    setHistory([]);
-    setDiscount("");
-    setSelection([]);
-    setSelectionStart(null);
-    setHanFixed({});
-    setTextGenerating(false);
-    setTextPreviewRows([]);
-    setConfirmedTexts({});
-    setTextPreviewOpen(false);
-    setKategorienToggle(false);
-    setCategoryPreviewRows([]);
-    setConfirmedCategories({});
-    setCategoryArtikelToName({});
-    setCategoryPreviewOpen(false);
-    toast({ title: lang === "DE" ? "Daten geleert" : "Data cleared", description: lang === "DE" ? "Alle eingefügten Inhalte wurden entfernt." : "All pasted content has been removed." });
-  }, [rowCount, lang, toast]);
-
 
 
   
@@ -590,10 +570,30 @@ const Index = () => {
     "Wickeltaschen", "Wickelunterlagen", "Wiegen", "Zubehör"
   ];
   const [rowCount, setRowCount] = useState("10");
-  const [rows, setRows] = useState<ClothRow[]>(() => 
+  const [rows, setRows] = useState<ClothRow[]>(() =>
     Array.from({ length: 10 }, () => createEmptyRow())
   );
   const [history, setHistory] = useState<ClothRow[][]>([]);
+
+  const handleClearData = useCallback(() => {
+    const count = Math.max(1, parseInt(rowCount, 10) || 10);
+    setRows(Array.from({ length: count }, () => createEmptyRow()));
+    setHistory([]);
+    setDiscount("");
+    setSelection([]);
+    setSelectionStart(null);
+    setHanFixed({});
+    setTextGenerating(false);
+    setTextPreviewRows([]);
+    setConfirmedTexts({});
+    setTextPreviewOpen(false);
+    setKategorienToggle(false);
+    setCategoryPreviewRows([]);
+    setConfirmedCategories({});
+    setCategoryArtikelToName({});
+    setCategoryPreviewOpen(false);
+    toast({ title: lang === "DE" ? "Daten geleert" : "Data cleared", description: lang === "DE" ? "Alle eingefügten Inhalte wurden entfernt." : "All pasted content has been removed." });
+  }, [rowCount, lang, toast]);
   const lastEditedCellRef = useRef<{ id: string; field: string } | null>(null);
   const [discount, setDiscount] = useState<string>("");
   const [selection, setSelection] = useState<CellPosition[]>([]);
