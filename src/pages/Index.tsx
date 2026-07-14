@@ -569,9 +569,9 @@ const Index = () => {
   const handleImportRows = useCallback((imported: Partial<Record<ImportTargetField, string>>[]) => {
     if (imported.length === 0) return;
     setRows(prev => {
-      const newRows = prev.filter(r =>
-        !r.Collection && !r.ItemName && !r.Measurement && !r.InfoMaterial &&
-        !r.color && !r.Size && !r.EAN && !r.HAN && !r.EK && !r.VK && !r.Menge
+      const existingNonEmpty = prev.filter(r =>
+        r.Collection || r.ItemName || r.Measurement || r.InfoMaterial ||
+        r.color || r.Size || r.EAN || r.HAN || r.EK || r.VK || r.Menge
       );
       const built = imported.map(item => ({
         ...createEmptyRow(),
@@ -588,7 +588,7 @@ const Index = () => {
         InfoMaterial: item.InfoMaterial ?? "",
         Description: item.Description ?? "",
       }));
-      const next = [...newRows, ...built];
+      const next = [...existingNonEmpty, ...built];
       setRowCount(String(next.length));
       return next;
     });
