@@ -15,7 +15,8 @@ import { TextPreviewModal, type TextPreviewRow } from "@/components/TextPreviewM
 import { CategoryPreviewModal, type CategoryPreviewRow } from "@/components/CategoryPreviewModal";
 import { JtlCheckModal, runJtlCheck, type JtlCheckResult, type JtlRow } from "@/components/JtlCheckModal";
 import { NamingPatternModal } from "@/components/NamingPatternModal";
-import { ShieldCheck, BookOpen } from "lucide-react";
+import { ArticlePreCheckModal, type PreCheckCandidate } from "@/components/ArticlePreCheckModal";
+import { ShieldCheck, BookOpen, ClipboardCheck } from "lucide-react";
 async function apiFetch(fn: string, body: object): Promise<{ data: unknown; error: Error | null }> {
   try {
     const res = await fetch(`/api/${fn}`, {
@@ -676,6 +677,8 @@ const Index = () => {
   const [jtlCheckOpen, setJtlCheckOpen] = useState(false);
   const [jtlCheckResults, setJtlCheckResults] = useState<JtlCheckResult[]>([]);
   const [namingPatternOpen, setNamingPatternOpen] = useState(false);
+  const [preCheckOpen, setPreCheckOpen] = useState(false);
+  const [preCheckCandidates, setPreCheckCandidates] = useState<PreCheckCandidate[]>([]);
 
   const handleJtlImport = useCallback(async (file: File) => {
     try {
@@ -2883,6 +2886,44 @@ const Index = () => {
             {t("csvExport", lang)}
           </Button>
 
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  disabled={jtlDataset.length === 0}
+                  onClick={() => {
+                    const candidates: PreCheckCandidate[] = rows
+                      .map((r, i) => ({
+                        rowId: r.id,
+                        rowIndex: i,
+                        clothName: getClothName(r),
+                        han: r.HAN,
+                        gtin: r.EAN,
+                        warengruppe: r.WarenGruppe,
+                        itemName: r.ItemName,
+                        infoMaterial: r.InfoMaterial,
+                        collection: r.Collection,
+                      }))
+                      .filter(c => c.han.trim() || c.gtin.trim() || c.clothName.trim());
+                    setPreCheckCandidates(candidates);
+                    setPreCheckOpen(true);
+                  }}
+                >
+                  <ClipboardCheck className="h-3.5 w-3.5" />
+                  {lang === "DE" ? "Vorabprüfung" : "Pre-check"}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {jtlDataset.length === 0
+                  ? (lang === "DE" ? "Erst JTL-Datei laden" : "Load a JTL file first")
+                  : (lang === "DE" ? "Duplikate, Varianten & Namen prüfen" : "Check duplicates, variants & names")}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
           <div className="w-px h-5 bg-border" />
 
           {/* ── AI tools ── */}
@@ -2993,6 +3034,14 @@ const Index = () => {
         onOpenChange={setNamingPatternOpen}
         dataset={jtlDataset}
         lang={lang}
+      />
+      <ArticlePreCheckModal
+        open={preCheckOpen}
+        onOpenChange={setPreCheckOpen}
+        candidates={preCheckCandidates}
+        jtlDataset={jtlDataset}
+        lang={lang}
+        onReuploadJtl={() => jtlFileInputRef.current?.click()}
       />
     </div>
   );
