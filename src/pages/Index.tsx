@@ -34,6 +34,61 @@ interface CellPosition {
   col: number;
 }
 
+interface JtlRow {
+  internerSchluessel: string;
+  artikelnummer: string;
+  vaterartikel: string;
+  artikelname: string;
+  warengruppe: string;
+  gtin: string;
+  han: string;
+}
+
+// ---- CSV utilities for JTL import ----
+function jtlParseCsv(text: string, delimiter: string): string[][] {
+  const rows: string[][] = [];
+  let field = "";
+  let row: string[] = [];
+  let inQuotes = false;
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { field += '"'; i += 2; continue; }
+        inQuotes = false; i++; continue;
+      }
+      field += ch; i++; continue;
+    }
+    if (ch === '"') { inQuotes = true; i++; continue; }
+    if (ch === delimiter) { row.push(field); field = ""; i++; continue; }
+    if (ch === "\r") { i++; continue; }
+    if (ch === "\n") { row.push(field); rows.push(row); row = []; field = ""; i++; continue; }
+    field += ch; i++;
+  }
+  if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+function jtlDetectDelimiter(text: string): string {
+  const sample = text.slice(0, 64 * 1024);
+  let inQ = false;
+  const counts: Record<string, number> = { ";": 0, ",": 0, "\t": 0, "|": 0 };
+  for (let i = 0; i < sample.length; i++) {
+    const c = sample[i];
+    if (c === '"') { if (inQ && sample[i + 1] === '"') { i++; continue; } inQ = !inQ; continue; }
+    if (!inQ && counts[c] !== undefined) counts[c]++;
+  }
+  // Default to semicolon for JTL exports; only override if another delimiter clearly dominates
+  const semi = counts[";"];
+  const best = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+  return best[1] > semi * 2 ? best[0] : ";";
+}
+
+function jtlStripBom(s: string): string {
+  return s.charCodeAt(0) === 0xfeff ? s.slice(1) : s;
+}
+
 interface ClothRow {
   id: string;
   Collection: string;
@@ -622,6 +677,58 @@ const Index = () => {
   const [confirmedCategories, setConfirmedCategories] = useState<Record<string, string>>({});
   // Maps artikelnummer → productName so onConfirm can save back to confirmedCategories
   const [categoryArtikelToName, setCategoryArtikelToName] = useState<Record<string, string>>({});
+
+  const [jtlDataset, setJtlDataset] = useState<JtlRow[]>([]);
+  const jtlFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleJtlImport = useCallback(async (file: File) => {
+    try {
+      const buf = await file.arrayBuffer();
+      // cp1252 default for JTL/Ameise exports; fall back to UTF-8 on replacement chars
+      let text = new TextDecoder("windows-1252").decode(buf);
+      if (text.includes("�")) text = new TextDecoder("utf-8").decode(buf);
+      text = jtlStripBom(text);
+      const delimiter = jtlDetectDelimiter(text);
+      const allRows = jtlParseCsv(text, delimiter);
+      if (allRows.length < 2) {
+        toast({ title: "Keine Daten", description: "Die Datei enthält keine verwertbaren Zeilen.", variant: "destructive" });
+        return;
+      }
+      const headers = allRows[0].map(h => h.trim().toLowerCase());
+      const colIdx = (names: string[]): number => {
+        for (const name of names) {
+          const idx = headers.findIndex(h => h === name || h.includes(name));
+          if (idx !== -1) return idx;
+        }
+        return -1;
+      };
+      const iInternerSchluessel = colIdx(["interner schlüssel", "interner schluessel", "schlüssel"]);
+      const iArtikelnummer = colIdx(["artikelnummer"]);
+      const iVaterartikel = colIdx(["identifizierungsspalte vaterartikel", "vaterartikel"]);
+      const iArtikelname = colIdx(["artikelname"]);
+      const iWarengruppe = colIdx(["warengruppe"]);
+      const iGtin = colIdx(["gtin", "ean"]);
+      const iHan = colIdx(["han"]);
+      const parsed: JtlRow[] = [];
+      for (let r = 1; r < allRows.length; r++) {
+        const row = allRows[r];
+        if (row.every(c => c.trim() === "")) continue;
+        parsed.push({
+          internerSchluessel: iInternerSchluessel >= 0 ? (row[iInternerSchluessel] ?? "").trim() : "",
+          artikelnummer: iArtikelnummer >= 0 ? (row[iArtikelnummer] ?? "").trim() : "",
+          vaterartikel: iVaterartikel >= 0 ? (row[iVaterartikel] ?? "").trim() : "",
+          artikelname: iArtikelname >= 0 ? (row[iArtikelname] ?? "").trim() : "",
+          warengruppe: iWarengruppe >= 0 ? (row[iWarengruppe] ?? "").trim() : "",
+          gtin: iGtin >= 0 ? (row[iGtin] ?? "").trim() : "",
+          han: iHan >= 0 ? (row[iHan] ?? "").trim() : "",
+        });
+      }
+      setJtlDataset(parsed);
+      toast({ title: `${parsed.length} Artikel geladen`, description: `JTL-Referenzdatei: ${file.name}` });
+    } catch (err) {
+      toast({ title: "Fehler beim Importieren", description: String(err), variant: "destructive" });
+    }
+  }, [toast]);
 
   const handleAIClassify = async () => {
     const filledRows = rows.filter(r => getClothName(r).trim() !== "");
@@ -2232,6 +2339,42 @@ const Index = () => {
           </div>
         </div>
         
+        {/* JTL Reference Import */}
+        <div className="bg-card border border-border rounded-lg px-4 py-3 mb-4 flex items-center gap-3">
+          <input
+            ref={jtlFileInputRef}
+            type="file"
+            accept=".csv,.txt"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handleJtlImport(f);
+              e.target.value = "";
+            }}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 shrink-0"
+            onClick={() => jtlFileInputRef.current?.click()}
+          >
+            <Upload className="h-4 w-4" />
+            {lang === "DE" ? "JTL-Artikeldaten laden" : "Load JTL article data"}
+          </Button>
+          {jtlDataset.length > 0 ? (
+            <span className="text-sm text-muted-foreground">
+              <span className="font-medium text-foreground">{jtlDataset.length.toLocaleString("de-DE")}</span>
+              {lang === "DE" ? " Artikel geladen" : " articles loaded"}
+            </span>
+          ) : (
+            <span className="text-sm text-muted-foreground">
+              {lang === "DE"
+                ? "JTL/Ameise-Exportdatei (.csv) als Referenz laden"
+                : "Load a JTL/Ameise export (.csv) as reference"}
+            </span>
+          )}
+        </div>
+
         {/* Input Controls */}
         <div className="bg-card border border-border rounded-lg p-4 mb-6">
           <div className="flex flex-wrap items-end gap-4">
