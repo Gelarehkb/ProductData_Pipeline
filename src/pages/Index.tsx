@@ -13,6 +13,8 @@ import { FindReplaceDialog } from "@/components/FindReplaceDialog";
 import { ImportDialog, type ImportTargetField } from "@/components/ImportDialog";
 import { TextPreviewModal, type TextPreviewRow } from "@/components/TextPreviewModal";
 import { CategoryPreviewModal, type CategoryPreviewRow } from "@/components/CategoryPreviewModal";
+import { JtlCheckModal, runJtlCheck, type JtlCheckResult, type JtlRow } from "@/components/JtlCheckModal";
+import { ShieldCheck } from "lucide-react";
 async function apiFetch(fn: string, body: object): Promise<{ data: unknown; error: Error | null }> {
   try {
     const res = await fetch(`/api/${fn}`, {
@@ -32,16 +34,6 @@ import { type Lang, t, warengruppeTranslations, farbeTranslations, artTranslatio
 interface CellPosition {
   row: number;
   col: number;
-}
-
-interface JtlRow {
-  internerSchluessel: string;
-  artikelnummer: string;
-  vaterartikel: string;
-  artikelname: string;
-  warengruppe: string;
-  gtin: string;
-  han: string;
 }
 
 // ---- CSV utilities for JTL import ----
@@ -680,6 +672,8 @@ const Index = () => {
 
   const [jtlDataset, setJtlDataset] = useState<JtlRow[]>([]);
   const jtlFileInputRef = useRef<HTMLInputElement>(null);
+  const [jtlCheckOpen, setJtlCheckOpen] = useState(false);
+  const [jtlCheckResults, setJtlCheckResults] = useState<JtlCheckResult[]>([]);
 
   const handleJtlImport = useCallback(async (file: File) => {
     try {
@@ -729,6 +723,22 @@ const Index = () => {
       toast({ title: "Fehler beim Importieren", description: String(err), variant: "destructive" });
     }
   }, [toast]);
+
+  const handleJtlCheck = useCallback(() => {
+    if (jtlDataset.length === 0) {
+      toast({ title: lang === "DE" ? "Keine Referenzdaten" : "No reference data", description: lang === "DE" ? "Bitte zuerst eine JTL-Datei laden." : "Please load a JTL file first.", variant: "destructive" });
+      return;
+    }
+    const candidates = rows
+      .map((r, i) => ({ rowIndex: i, clothName: getClothName(r), han: r.HAN, gtin: r.EAN }))
+      .filter(c => c.han.trim() !== "" || c.gtin.trim() !== "");
+    if (candidates.length === 0) {
+      toast({ title: lang === "DE" ? "Keine prüfbaren Zeilen" : "No checkable rows", description: lang === "DE" ? "Fülle HAN oder GTIN/EAN Felder aus." : "Fill in HAN or GTIN/EAN fields.", variant: "destructive" });
+      return;
+    }
+    setJtlCheckResults(runJtlCheck(candidates, jtlDataset));
+    setJtlCheckOpen(true);
+  }, [rows, jtlDataset, lang, toast]);
 
   const handleAIClassify = async () => {
     const filledRows = rows.filter(r => getClothName(r).trim() !== "");
@@ -2896,6 +2906,34 @@ const Index = () => {
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
+
+          <div className="w-px h-5 bg-border" />
+
+          {/* ── JTL duplicate check ── */}
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={handleJtlCheck}
+                  disabled={jtlDataset.length === 0}
+                >
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  {lang === "DE" ? "JTL Prüfen" : "JTL Check"}
+                  {jtlDataset.length > 0 && (
+                    <span className="text-[10px] text-muted-foreground">({jtlDataset.length.toLocaleString("de-DE")})</span>
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {jtlDataset.length === 0
+                  ? (lang === "DE" ? "Erst JTL-Datei laden" : "Load a JTL file first")
+                  : (lang === "DE" ? "HAN/GTIN gegen JTL-Referenz prüfen" : "Check HAN/GTIN against JTL reference")}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
       </div>
       <ImportDialog open={importDialogOpen} onOpenChange={setImportDialogOpen} onImport={handleImportRows} lang={lang} />
@@ -2918,6 +2956,12 @@ const Index = () => {
         initialRows={categoryPreviewRows}
         lang={lang}
         onConfirm={handleCategoryConfirm}
+      />
+      <JtlCheckModal
+        open={jtlCheckOpen}
+        onOpenChange={setJtlCheckOpen}
+        results={jtlCheckResults}
+        lang={lang}
       />
     </div>
   );
