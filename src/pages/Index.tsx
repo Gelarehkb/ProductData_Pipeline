@@ -379,7 +379,6 @@ const buildRow = (
     "EAN": EAN || "",
     "HAN": HAN || "",
     "Artikelname/Etikettenname": nameWithColor,
-    "Artikelname/Online-shop": nameWithColor,
     "VarName 1 (Größe)": "Größe",
     "Wert Name 1": size || "",
     "Größe Sort.no": "",
