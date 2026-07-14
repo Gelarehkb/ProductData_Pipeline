@@ -14,7 +14,8 @@ import { ImportDialog, type ImportTargetField } from "@/components/ImportDialog"
 import { TextPreviewModal, type TextPreviewRow } from "@/components/TextPreviewModal";
 import { CategoryPreviewModal, type CategoryPreviewRow } from "@/components/CategoryPreviewModal";
 import { JtlCheckModal, runJtlCheck, type JtlCheckResult, type JtlRow } from "@/components/JtlCheckModal";
-import { ShieldCheck } from "lucide-react";
+import { NamingPatternModal } from "@/components/NamingPatternModal";
+import { ShieldCheck, BookOpen } from "lucide-react";
 async function apiFetch(fn: string, body: object): Promise<{ data: unknown; error: Error | null }> {
   try {
     const res = await fetch(`/api/${fn}`, {
@@ -674,6 +675,7 @@ const Index = () => {
   const jtlFileInputRef = useRef<HTMLInputElement>(null);
   const [jtlCheckOpen, setJtlCheckOpen] = useState(false);
   const [jtlCheckResults, setJtlCheckResults] = useState<JtlCheckResult[]>([]);
+  const [namingPatternOpen, setNamingPatternOpen] = useState(false);
 
   const handleJtlImport = useCallback(async (file: File) => {
     try {
@@ -2934,6 +2936,29 @@ const Index = () => {
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
+
+          {/* ── Naming pattern analysis ── */}
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => setNamingPatternOpen(true)}
+                  disabled={jtlDataset.length === 0}
+                >
+                  <BookOpen className="h-3.5 w-3.5" />
+                  {lang === "DE" ? "Namensanalyse" : "Name patterns"}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {jtlDataset.length === 0
+                  ? (lang === "DE" ? "Erst JTL-Datei laden" : "Load a JTL file first")
+                  : (lang === "DE" ? "Namensstruktur pro Warengruppe analysieren" : "Analyze naming structure per product group")}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
       </div>
       <ImportDialog open={importDialogOpen} onOpenChange={setImportDialogOpen} onImport={handleImportRows} lang={lang} />
@@ -2961,6 +2986,12 @@ const Index = () => {
         open={jtlCheckOpen}
         onOpenChange={setJtlCheckOpen}
         results={jtlCheckResults}
+        lang={lang}
+      />
+      <NamingPatternModal
+        open={namingPatternOpen}
+        onOpenChange={setNamingPatternOpen}
+        dataset={jtlDataset}
         lang={lang}
       />
     </div>

@@ -345,6 +345,166 @@ Respond ONLY with a JSON array of strings, same order, no markdown:
 });
 
 
+// ── Naming pattern analysis (Anthropic API) ───────────────────────────────────
+
+/** In-memory cache: "warengruppe:inputHash" → result. Survives server lifetime. */
+const namingPatternCache = new Map();
+
+/**
+ * Fixed system prompt — marked for Anthropic prompt caching.
+ * Stays identical across every call so the cache token hit rate is high.
+ */
+const NAMING_SYSTEM_PROMPT = `You are a product naming analyst for a German children's goods retailer.
+
+Analyze the naming convention used in the provided Artikelname list and return ONLY valid JSON matching this exact schema (no prose, no markdown, no extra fields):
+
+{"wg":"<warengruppe>","pat":"<template>","conf":"high|medium|low","bp":"first|last|none","ev":["<ex1>","<ex2>","<ex3>"]}
+
+Schema rules:
+- "pat": a template string with fixed tokens where consistent and bracketed placeholders where variable. Use exactly these placeholder labels: [Marke] [Produkttyp] [Attribut/Material] [Größe/Variante] [Farbe] [Modell].
+- "conf": "high" if ≥70% of names fit, "medium" if 45–69%, "low" if <45% or fewer than 4 names.
+- "bp": "first" if a brand-like token (proper noun, not a German product-type word) typically appears at position 0, "last" if typically at the end, "none" if no brand detected.
+- "ev": 2–3 representative example names from the input that best illustrate the pattern.`;
+
+/** Call the Anthropic Messages API directly (no SDK). */
+async function callAnthropic(userContent, model = 'claude-haiku-4-5-20251001') {
+  const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+  if (!ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY not configured');
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+      'anthropic-beta': 'prompt-caching-2024-07-31',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 300,
+      system: [{ type: 'text', text: NAMING_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: userContent }],
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Anthropic API [${res.status}]: ${text.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  const raw = data?.content?.[0]?.text ?? '';
+  return raw.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
+}
+
+/** Analyze a single Warengruppe — Haiku first, escalate to Sonnet on low confidence. */
+async function analyzePatternWithAI(warengruppe, names) {
+  const userContent =
+    `Warengruppe: ${warengruppe}\nNames (representative sample):\n${names.map(n => `- ${n}`).join('\n')}`;
+
+  // Try Haiku first (fast, cheap)
+  let jsonText = await callAnthropic(userContent, 'claude-haiku-4-5-20251001');
+  let result = JSON.parse(jsonText);
+
+  // Escalate to Sonnet if confidence is low
+  if (result.conf === 'low') {
+    jsonText = await callAnthropic(userContent, 'claude-sonnet-5');
+    result = JSON.parse(jsonText);
+    result._model = 'sonnet';
+  } else {
+    result._model = 'haiku';
+  }
+
+  return result;
+}
+
+app.post('/api/analyze-naming-pattern', async (req, res) => {
+  try {
+    const { groups } = req.body; // [{ warengruppe, names, inputHash }]
+    if (!Array.isArray(groups) || groups.length === 0) {
+      return res.status(400).json({ error: 'groups array is required' });
+    }
+
+    const results = [];
+
+    for (const group of groups) {
+      const { warengruppe, names, inputHash } = group;
+      const cacheKey = `${warengruppe}:${inputHash}`;
+
+      if (namingPatternCache.has(cacheKey)) {
+        results.push({ ...namingPatternCache.get(cacheKey), cached: true });
+        continue;
+      }
+
+      const result = await analyzePatternWithAI(warengruppe, names);
+      result.warengruppe = warengruppe;
+      result.cached = false;
+      namingPatternCache.set(cacheKey, result);
+      results.push(result);
+    }
+
+    res.json({ results });
+  } catch (err) {
+    console.error('analyze-naming-pattern error:', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// Fixed system prompt for name suggestion (also cached by Anthropic).
+const SUGGEST_SYSTEM_PROMPT = `You compose German Artikelnames for a children's goods retailer.
+
+Given a detected naming pattern and the item's raw attributes, return ONLY valid JSON (no prose, no markdown):
+{"name":"<suggested_artikelname>","conf":"high|medium|low"}
+
+Rules:
+- Follow the pattern's token order exactly.
+- Omit bracketed slots for which no input was provided.
+- "conf": "high" if you are confident the name matches the convention, "medium" if partially confident, "low" if uncertain.`;
+
+app.post('/api/suggest-artikelname-ai', async (req, res) => {
+  try {
+    const { pattern, brandPosition, warengruppe, productType, material, brand } = req.body;
+    if (!pattern) return res.status(400).json({ error: 'pattern is required' });
+
+    const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+    if (!ANTHROPIC_API_KEY) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured' });
+
+    const userContent = [
+      `Warengruppe: ${warengruppe || '—'}`,
+      `Naming pattern: ${pattern}`,
+      `Brand position hint: ${brandPosition || 'unknown'}`,
+      `Produkttyp: ${productType || '—'}`,
+      `Material/Attribut: ${material || '—'}`,
+      `Marke: ${brand || '—'}`,
+    ].join('\n');
+
+    const apiRes = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'anthropic-beta': 'prompt-caching-2024-07-31',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 80,
+        system: [{ type: 'text', text: SUGGEST_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+        messages: [{ role: 'user', content: userContent }],
+      }),
+    });
+
+    if (!apiRes.ok) throw new Error(`Anthropic API [${apiRes.status}]`);
+    const data = await apiRes.json();
+    let raw = data?.content?.[0]?.text ?? '';
+    raw = raw.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
+    const parsed = JSON.parse(raw);
+    res.json(parsed);
+  } catch (err) {
+    console.error('suggest-artikelname-ai error:', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
 app.use('/api/generate-online-texts-simple', generateSimple);
@@ -360,4 +520,5 @@ if (isProd) {
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
   console.log('OPENAI_API_KEY configured:', !!process.env.OPENAI_API_KEY);
+  console.log('ANTHROPIC_API_KEY configured:', !!process.env.ANTHROPIC_API_KEY);
 });
