@@ -730,7 +730,7 @@ const Index = () => {
       return;
     }
     const candidates = rows
-      .map((r, i) => ({ rowIndex: i, clothName: getClothName(r), han: r.HAN, gtin: r.EAN }))
+      .map((r, i) => ({ rowIndex: i, clothName: getClothName(r), han: r.HAN, gtin: r.EAN, warengruppe: r.WarenGruppe }))
       .filter(c => c.han.trim() !== "" || c.gtin.trim() !== "");
     if (candidates.length === 0) {
       toast({ title: lang === "DE" ? "Keine prüfbaren Zeilen" : "No checkable rows", description: lang === "DE" ? "Fülle HAN oder GTIN/EAN Felder aus." : "Fill in HAN or GTIN/EAN fields.", variant: "destructive" });
