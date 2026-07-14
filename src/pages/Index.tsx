@@ -559,6 +559,13 @@ const Index = () => {
   const [confirmedTexts, setConfirmedTexts] = useState<Record<string, { produkttext: string; Title_Tag: string; html_de: string; meta_description: string; suchbegriffe: string }>>({});
   const [importDialogOpen, setImportDialogOpen] = useState(false);
 
+  // ── Product link search ──────────────────────────────────────────────────────
+  const productLinkClientCache = useRef<Map<string, string>>(new Map()); // han.lower → url (""=no result)
+  const autoFoundLinks = useRef<Map<string, string>>(new Map()); // rowId → url that was auto-inserted
+  const autoTriggeredHANs = useRef<Set<string>>(new Set()); // han.lower values already auto-triggered
+  const [isFindingLinks, setIsFindingLinks] = useState(false);
+  const [findLinkStatus, setFindLinkStatus] = useState<Record<string, "loading" | "found" | "not_found" | "error">>({});
+
   const handleImportRows = useCallback((imported: Partial<Record<ImportTargetField, string>>[]) => {
     if (imported.length === 0) return;
     setRows(prev => {
@@ -1839,6 +1846,116 @@ const Index = () => {
     });
   };
 
+  // ── Product link helpers ─────────────────────────────────────────────────────
+
+  const applyProductLink = useCallback((rowId: string, url: string) => {
+    setRows(prev => prev.map(r => {
+      if (r.id !== rowId) return r;
+      const base = r.Description || "";
+      const prevUrl = autoFoundLinks.current.get(rowId);
+      // Remove any previously auto-inserted link line before appending the new one
+      const cleaned = prevUrl
+        ? base.replace(`\nProduktlink: ${prevUrl}`, "").replace(`Produktlink: ${prevUrl}`, "").trimEnd()
+        : base.trimEnd();
+      autoFoundLinks.current.set(rowId, url);
+      return { ...r, Description: (cleaned ? cleaned + "\n" : "") + `Produktlink: ${url}` };
+    }));
+  }, []);
+
+  const handleFindAllProductLinks = async () => {
+    if (!hersteller.trim()) {
+      toast({ title: lang === "DE" ? "Hersteller fehlt" : "Brand missing", description: lang === "DE" ? "Bitte Hersteller ausfüllen." : "Please enter a brand name.", variant: "destructive" });
+      return;
+    }
+    const rowsWithHAN = rows.filter(r => (r.HAN || "").trim());
+    if (!rowsWithHAN.length) {
+      toast({ title: lang === "DE" ? "Keine HAN-Werte" : "No HAN values", description: lang === "DE" ? "Keine Zeilen mit HAN-Wert vorhanden." : "No rows have a HAN value.", variant: "destructive" });
+      return;
+    }
+    setIsFindingLinks(true);
+    let found = 0, notFound = 0;
+    for (const r of rowsWithHAN) {
+      const han = (r.HAN || "").trim();
+      if (!han) continue;
+      const cacheKey = han.toLowerCase();
+      // Manual click always re-fetches (force refresh)
+      setFindLinkStatus(prev => ({ ...prev, [r.id]: "loading" }));
+      try {
+        const res = await fetch("/api/find-product-link", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ han, brand: hersteller.trim() }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error || res.statusText);
+        if (data.url) {
+          productLinkClientCache.current.set(cacheKey, data.url);
+          applyProductLink(r.id, data.url);
+          setFindLinkStatus(prev => ({ ...prev, [r.id]: "found" }));
+          found++;
+        } else {
+          productLinkClientCache.current.set(cacheKey, "");
+          setFindLinkStatus(prev => ({ ...prev, [r.id]: "not_found" }));
+          notFound++;
+        }
+      } catch (err) {
+        setFindLinkStatus(prev => ({ ...prev, [r.id]: "error" }));
+        notFound++;
+      }
+    }
+    setIsFindingLinks(false);
+    if (found > 0) {
+      toast({
+        title: lang === "DE" ? `${found} Produktlink${found !== 1 ? "s" : ""} gefunden` : `${found} product link${found !== 1 ? "s" : ""} found`,
+        description: notFound > 0 ? (lang === "DE" ? `${notFound} ohne Ergebnis` : `${notFound} not found`) : undefined,
+      });
+    } else {
+      toast({ title: lang === "DE" ? "Kein Produktlink gefunden" : "No product links found", description: lang === "DE" ? `Für ${notFound} Artikel kein Link gefunden.` : `No link found for ${notFound} articles.`, variant: "destructive" });
+    }
+  };
+
+  // Auto-trigger: when a row gains a new HAN value and its Description is empty, search automatically
+  useEffect(() => {
+    rows.forEach(r => {
+      const han = (r.HAN || "").trim();
+      if (!han) return;
+      const cacheKey = han.toLowerCase();
+      if (autoTriggeredHANs.current.has(cacheKey)) return;
+      autoTriggeredHANs.current.add(cacheKey);
+      // Only auto-search if Description is empty
+      if ((r.Description || "").trim()) return;
+      const brand = hersteller.trim();
+      if (!brand) return;
+      (async () => {
+        setFindLinkStatus(prev => ({ ...prev, [r.id]: "loading" }));
+        try {
+          const cached = productLinkClientCache.current.get(cacheKey);
+          if (cached !== undefined) {
+            if (cached) { applyProductLink(r.id, cached); setFindLinkStatus(prev => ({ ...prev, [r.id]: "found" })); }
+            else { setFindLinkStatus(prev => ({ ...prev, [r.id]: "not_found" })); }
+            return;
+          }
+          const res = await fetch("/api/find-product-link", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ han, brand }),
+          });
+          const data = await res.json();
+          if (res.ok && data.url) {
+            productLinkClientCache.current.set(cacheKey, data.url);
+            applyProductLink(r.id, data.url);
+            setFindLinkStatus(prev => ({ ...prev, [r.id]: "found" }));
+          } else {
+            productLinkClientCache.current.set(cacheKey, "");
+            setFindLinkStatus(prev => ({ ...prev, [r.id]: "not_found" }));
+          }
+        } catch {
+          setFindLinkStatus(prev => ({ ...prev, [r.id]: "error" }));
+        }
+      })();
+    });
+  }, [rows]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleGenerateTexts = async () => {
     const filledRows = rows.filter(r => getClothName(r).trim() !== "");
     if (filledRows.length === 0) {
@@ -2608,6 +2725,17 @@ const Index = () => {
                                 </button>
                               </>
                             )}
+                            {col.key === "Description" && (
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); handleFindAllProductLinks(); }}
+                                className="px-1.5 py-0.5 text-[10px] rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                                title={lang === "DE" ? "Produktlink per KI-Websuche finden (HAN + Hersteller)" : "Find product link via AI web search (HAN + brand)"}
+                                disabled={isFindingLinks}
+                              >
+                                {isFindingLinks ? "..." : "Find"}
+                              </button>
+                            )}
                           </span>
                         )}
                         {col.resizable && (
@@ -2739,6 +2867,34 @@ const Index = () => {
                                   onDoubleClick={(e) => { e.stopPropagation(); handleFillDoubleClick(rowIndex, colIndex); }}
                                   title={t("fillDoubleClick", lang)}
                                 />
+                              )}
+                            </div>
+                          ) : col.key === "Description" ? (
+                            <div className="relative">
+                              <input
+                                type="text"
+                                value={cellValue}
+                                onChange={(e) => handleCellChange(row.id, col.key, e.target.value)}
+                                onPaste={(e) => handleCellPaste(e, rowIndex, colIndex, col.key)}
+                                onKeyDown={(e) => handleKeyNavigation(e, rowIndex, colIndex)}
+                                data-row={rowIndex}
+                                data-col={colIndex}
+                                className="w-full px-2 py-1.5 bg-transparent border-none outline-none focus:ring-2 focus:ring-primary/50 text-sm pr-8"
+                              />
+                              {findLinkStatus[row.id] === "loading" && (
+                                <span className="absolute top-1/2 -translate-y-1/2 right-2 text-[10px] text-muted-foreground pointer-events-none animate-pulse">⌛</span>
+                              )}
+                              {findLinkStatus[row.id] === "found" && (
+                                <span
+                                  className="absolute top-1/2 -translate-y-1/2 right-2 text-[10px] text-blue-500 pointer-events-none"
+                                  title={lang === "DE" ? "Produktlink auto-gefunden" : "Product link auto-found"}
+                                >🔗</span>
+                              )}
+                              {findLinkStatus[row.id] === "not_found" && (
+                                <span
+                                  className="absolute top-1/2 -translate-y-1/2 right-2 text-[10px] text-muted-foreground/50 pointer-events-none"
+                                  title={lang === "DE" ? "Kein Link gefunden" : "No link found"}
+                                >∅</span>
                               )}
                             </div>
                           ) : (

@@ -474,6 +474,77 @@ app.post('/api/suggest-artikelname-ai', async (req, res) => {
   }
 });
 
+// ── find-product-link (OpenAI Responses API web search) ───────────────────────
+
+/** Server-side cache keyed by "han:brand" (lowercased). "" = confirmed no-result. */
+const productLinkServerCache = new Map();
+
+app.post('/api/find-product-link', async (req, res) => {
+  try {
+    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+    if (!OPENAI_API_KEY) return res.status(500).json({ error: 'OPENAI_API_KEY not configured' });
+
+    const { han, brand } = req.body;
+    if (!han?.trim()) return res.status(400).json({ error: 'han is required' });
+
+    const cacheKey = `${han.trim().toLowerCase()}:${(brand || '').trim().toLowerCase()}`;
+    if (productLinkServerCache.has(cacheKey)) {
+      const cached = productLinkServerCache.get(cacheKey);
+      return res.json({ url: cached || null, cached: true });
+    }
+
+    const brandPart = (brand || '').trim();
+    const query = brandPart
+      ? `${brandPart} ${han.trim()} Produktseite OR Hersteller site`
+      : `${han.trim()} Produktseite Hersteller`;
+
+    const response = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${OPENAI_API_KEY}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        tools: [{ type: 'web_search_preview' }],
+        input: `Find the single most relevant product page URL for this article:
+HAN/Article number: ${han.trim()}${brandPart ? `\nBrand: ${brandPart}` : ''}
+Return only the direct URL of the most authoritative product page (prefer the brand's own website or a major retailer). Output only the URL, nothing else.`,
+      }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`OpenAI API [${response.status}]: ${text.slice(0, 300)}`);
+    }
+
+    const data = await response.json();
+
+    // Extract first URL from url_citation annotations in the message output
+    let url = null;
+    for (const item of data?.output ?? []) {
+      if (item.type === 'message') {
+        for (const content of item.content ?? []) {
+          // Check annotations first (cited URLs)
+          for (const ann of content.annotations ?? []) {
+            if (ann.type === 'url_citation' && ann.url) { url = ann.url; break; }
+          }
+          if (url) break;
+          // Fallback: extract from plain text if it looks like a URL
+          if (!url && content.text) {
+            const m = content.text.match(/https?:\/\/[^\s"'<>)]+/);
+            if (m) url = m[0];
+          }
+        }
+      }
+      if (url) break;
+    }
+
+    productLinkServerCache.set(cacheKey, url ?? '');
+    res.json({ url });
+  } catch (err) {
+    console.error('find-product-link error:', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
 app.use('/api/generate-online-texts-simple', generateSimple);
