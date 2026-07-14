@@ -672,7 +672,15 @@ const Index = () => {
   // Maps artikelnummer → productName so onConfirm can save back to confirmedCategories
   const [categoryArtikelToName, setCategoryArtikelToName] = useState<Record<string, string>>({});
 
-  const [jtlDataset, setJtlDataset] = useState<JtlRow[]>([]);
+  const [jtlDataset, setJtlDataset] = useState<JtlRow[]>(() => {
+    try {
+      const cached = sessionStorage.getItem("jtlDatasetCache");
+      return cached ? (JSON.parse(cached) as JtlRow[]) : [];
+    } catch { return []; }
+  });
+  const [jtlCachedFileName, setJtlCachedFileName] = useState<string>(() => {
+    try { return sessionStorage.getItem("jtlDatasetFileName") ?? ""; } catch { return ""; }
+  });
   const jtlFileInputRef = useRef<HTMLInputElement>(null);
   const [jtlCheckOpen, setJtlCheckOpen] = useState(false);
   const [jtlCheckResults, setJtlCheckResults] = useState<JtlCheckResult[]>([]);
@@ -723,11 +731,25 @@ const Index = () => {
         });
       }
       setJtlDataset(parsed);
+      setJtlCachedFileName(file.name);
+      try {
+        sessionStorage.setItem("jtlDatasetCache", JSON.stringify(parsed));
+        sessionStorage.setItem("jtlDatasetFileName", file.name);
+      } catch { /* quota exceeded — skip caching */ }
       toast({ title: `${parsed.length} Artikel geladen`, description: `JTL-Referenzdatei: ${file.name}` });
     } catch (err) {
       toast({ title: "Fehler beim Importieren", description: String(err), variant: "destructive" });
     }
   }, [toast]);
+
+  const clearJtlDataset = useCallback(() => {
+    setJtlDataset([]);
+    setJtlCachedFileName("");
+    try {
+      sessionStorage.removeItem("jtlDatasetCache");
+      sessionStorage.removeItem("jtlDatasetFileName");
+    } catch { /* ignore */ }
+  }, []);
 
   const handleJtlCheck = useCallback(() => {
     if (jtlDataset.length === 0) {
@@ -2377,9 +2399,26 @@ const Index = () => {
             {lang === "DE" ? "JTL-Artikeldaten laden" : "Load JTL article data"}
           </Button>
           {jtlDataset.length > 0 ? (
-            <span className="text-sm text-muted-foreground">
-              <span className="font-medium text-foreground">{jtlDataset.length.toLocaleString("de-DE")}</span>
-              {lang === "DE" ? " Artikel geladen" : " articles loaded"}
+            <span className="text-sm text-muted-foreground flex items-center gap-2 min-w-0">
+              <span className="shrink-0">
+                <span className="font-medium text-foreground">{jtlDataset.length.toLocaleString("de-DE")}</span>
+                {lang === "DE" ? " Artikel geladen" : " articles loaded"}
+              </span>
+              {jtlCachedFileName && (
+                <span
+                  className="text-xs text-muted-foreground/60 truncate max-w-[200px]"
+                  title={jtlCachedFileName}
+                >
+                  {jtlCachedFileName}
+                </span>
+              )}
+              <button
+                onClick={clearJtlDataset}
+                title={lang === "DE" ? "Referenzdaten entfernen" : "Remove reference data"}
+                className="shrink-0 text-muted-foreground/50 hover:text-destructive text-base leading-none"
+              >
+                ×
+              </button>
             </span>
           ) : (
             <span className="text-sm text-muted-foreground">
