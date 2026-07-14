@@ -81,7 +81,7 @@ export interface WgPattern {
 // ── Tokenization ──────────────────────────────────────────────────────────────
 
 /** Split on whitespace only — hyphens are part of compound tokens (e.g. "Bio-Baumwolle"). */
-function tokenize(name: string): string[] {
+export function tokenize(name: string): string[] {
   return name.trim().split(/\s+/).filter(t => t.length > 0);
 }
 
@@ -369,6 +369,34 @@ export function applyAiPatternLocally(
     .replace(/\[([^\]]+)\]/g, (_, label) => labelMap[label.toLowerCase()] ?? "")
     .replace(/\s{2,}/g, " ")
     .trim();
+}
+
+/**
+ * Restructure an existing Artikelname to match its Warengruppe's detected pattern:
+ * fixed slots are normalized to the dominant token, variable slots keep this name's
+ * own value. Returns the original (trimmed) name when no reliable pattern exists.
+ */
+export function buildNamingSuggestion(name: string, pattern: WgPattern | undefined): string {
+  const trimmed = name.trim();
+  if (!pattern || !pattern.reliable || pattern.slots.length === 0) return trimmed;
+
+  const tokens = tokenize(trimmed);
+  const maxPos = Math.max(...pattern.slots.map(s => s.position));
+  const parts: string[] = [];
+
+  for (let i = 0; i <= maxPos; i++) {
+    const slot = pattern.slots.find(s => s.position === i);
+    if (slot?.isFixed) {
+      parts.push(slot.topToken);
+    } else if (tokens[i]) {
+      parts.push(tokens[i]);
+    } else if (slot) {
+      parts.push(slot.topToken);
+    }
+  }
+  if (tokens.length > maxPos + 1) parts.push(...tokens.slice(maxPos + 1));
+
+  return parts.join(" ").replace(/\s{2,}/g, " ").trim();
 }
 
 export function suggestArtikelname(

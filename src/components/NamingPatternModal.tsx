@@ -1,21 +1,17 @@
-import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import {
-  ChevronDown, ChevronRight, Sparkles, Loader2, AlertCircle, CheckCircle2,
-  TrendingUp, Brain, Copy,
+  ChevronDown, ChevronRight, Loader2, AlertCircle,
+  Brain, Copy,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { type Lang } from "@/lib/translations";
 import type { JtlRow } from "@/components/JtlCheckModal";
 import {
-  analyzeAllPatterns, getRepresentativeNames, hashStrings, suggestArtikelname,
-  applyAiPatternLocally,
-  type WgPattern, type SlotInfo, type FamilyPrefixPattern, type NameSuggestionInputs,
+  analyzeAllPatterns, getRepresentativeNames, hashStrings, buildNamingSuggestion,
+  type WgPattern, type SlotInfo, type FamilyPrefixPattern,
 } from "@/lib/namingPatterns";
 
 // ── AI result type (mirrors server response) ──────────────────────────────────
@@ -122,53 +118,25 @@ export const NamingPatternModal = ({ open, onOpenChange, dataset, lang }: Naming
     });
   }, [rulePatterns]);
 
-  // ── Name suggestion state ────────────────────────────────────────────────
-  const [selectedWg, setSelectedWg] = useState("");
-  const [inputs, setInputs] = useState<NameSuggestionInputs>({ productType: "", material: "", brand: "" });
-  const [localSuggestion, setLocalSuggestion] = useState<string | null>(null);
-  const [aiSuggestion, setAiSuggestion] = useState<{ name: string; conf: string } | null>(null);
-  const [suggestingAi, setSuggestingAi] = useState(false);
-
-  const activePat = selectedWg ? rulePatterns.get(selectedWg) : undefined;
-  const activeAiPat = selectedWg ? aiPatterns.get(selectedWg) : undefined;
-
-  const handleLocalSuggest = useCallback(() => {
-    setLocalSuggestion(null);
-    setAiSuggestion(null);
-    if (!activePat && !activeAiPat) return;
-
-    if (activeAiPat) {
-      const name = applyAiPatternLocally(activeAiPat.pat, inputs);
-      if (name) { setLocalSuggestion(name); return; }
-    }
-    if (activePat?.reliable) {
-      const s = suggestArtikelname(activePat, inputs);
-      if (s) setLocalSuggestion(s.name);
-    }
-  }, [activePat, activeAiPat, inputs]);
-
-  const handleAiSuggest = useCallback(async () => {
-    if (!selectedWg) return;
-    const pat = activeAiPat?.pat ?? activePat?.patternTemplate;
-    const bp = activeAiPat?.bp ?? "none";
-    if (!pat) return;
-
-    setSuggestingAi(true);
-    try {
-      const res = await fetch("/api/suggest-artikelname-ai", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pattern: pat, brandPosition: bp, warengruppe: selectedWg, ...inputs }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      setAiSuggestion(data);
-    } catch (err) {
-      toast({ title: DE ? "KI-Fehler" : "AI error", description: String(err), variant: "destructive" });
-    } finally {
-      setSuggestingAi(false);
-    }
-  }, [selectedWg, activeAiPat, activePat, inputs, DE, toast]);
+  // ── Naming ideas: per-product restructured name suggestions ─────────────
+  // Artikelname itself is never changed — the suggestion only ever appears
+  // in this derived "Namensvorschlag" column.
+  const namingSuggestions = useMemo(() => {
+    return dataset
+      .filter(r => r.artikelname.trim() && r.warengruppe.trim())
+      .map(r => {
+        const pattern = rulePatterns.get(r.warengruppe.trim());
+        const suggestion = buildNamingSuggestion(r.artikelname, pattern);
+        return {
+          artikelname: r.artikelname.trim(),
+          warengruppe: r.warengruppe.trim(),
+          suggestion,
+          changed: suggestion !== r.artikelname.trim(),
+        };
+      })
+      .filter(r => r.changed)
+      .sort((a, b) => a.warengruppe.localeCompare(b.warengruppe) || a.artikelname.localeCompare(b.artikelname));
+  }, [dataset, rulePatterns]);
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text).then(() =>
@@ -202,91 +170,49 @@ export const NamingPatternModal = ({ open, onOpenChange, dataset, lang }: Naming
         )}
 
         <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }} className="space-y-4 pr-1">
-          {/* ── Name suggestion panel ─────────────────────────────────────── */}
+          {/* ── Naming ideas table ─────────────────────────────────────────── */}
           <div className="rounded-lg border border-border bg-card p-4 space-y-3">
-            <p className="text-sm font-semibold">{DE ? "Artikelname vorschlagen" : "Suggest article name"}</p>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <div className="space-y-1">
-                <Label className="text-xs">{DE ? "Warengruppe" : "Product group"}</Label>
-                <Select value={selectedWg} onValueChange={wg => { setSelectedWg(wg); setLocalSuggestion(null); setAiSuggestion(null); }}>
-                  <SelectTrigger className="h-8 text-xs">
-                    <SelectValue placeholder={DE ? "Wählen…" : "Select…"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {sortedWgs.map(([wg, p]) => (
-                      <SelectItem key={wg} value={wg}>
-                        <span className="flex items-center gap-1.5">
-                          {p.reliable
-                            ? <CheckCircle2 className="h-3 w-3 text-green-500 shrink-0" />
-                            : aiPatterns.has(wg)
-                              ? <Brain className="h-3 w-3 text-blue-500 shrink-0" />
-                              : <AlertCircle className="h-3 w-3 text-amber-500 shrink-0" />}
-                          {wg}
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {(["productType", "material", "brand"] as const).map(key => {
-                const labels = {
-                  productType: { de: "Produkttyp", en: "Product type", ph: "z.B. Schlafsack" },
-                  material: { de: "Material/Attribut", en: "Material/Attribute", ph: "z.B. Merino" },
-                  brand: { de: "Marke", en: "Brand", ph: "z.B. Engel" },
-                }[key];
-                return (
-                  <div key={key} className="space-y-1">
-                    <Label className="text-xs">{DE ? labels.de : labels.en}</Label>
-                    <Input
-                      className="h-8 text-xs"
-                      placeholder={labels.ph}
-                      value={inputs[key]}
-                      onChange={e => setInputs(prev => ({ ...prev, [key]: e.target.value }))}
-                    />
-                  </div>
-                );
-              })}
+            <div>
+              <p className="text-sm font-semibold">{DE ? "Namensvorschläge" : "Naming ideas"}</p>
+              <p className="text-xs text-muted-foreground">
+                {DE
+                  ? `${namingSuggestions.length} Artikelnamen weichen vom erkannten Muster ihrer Warengruppe ab — der Artikelname bleibt unverändert, Vorschläge erscheinen nur unten.`
+                  : `${namingSuggestions.length} article names deviate from their product group's detected pattern — Artikelname stays unchanged, suggestions only appear below.`}
+              </p>
             </div>
-
-            <div className="flex items-center gap-2 flex-wrap">
-              <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={handleLocalSuggest} disabled={!selectedWg}>
-                <TrendingUp className="h-3.5 w-3.5" />
-                {DE ? "Lokal vorschlagen" : "Suggest locally"}
-              </Button>
-              <Button size="sm" className="gap-1.5 h-8" onClick={handleAiSuggest}
-                disabled={!selectedWg || suggestingAi || (!activePat?.reliable && !activeAiPat)}>
-                {suggestingAi ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                {DE ? "KI-Vorschlag" : "AI suggestion"}
-              </Button>
+            <div className="rounded-md border border-border overflow-hidden max-h-72 overflow-y-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-muted/60 sticky top-0">
+                  <tr>
+                    <th className="text-left px-2 py-1 font-medium text-muted-foreground">{DE ? "Warengruppe" : "Product group"}</th>
+                    <th className="text-left px-2 py-1 font-medium text-muted-foreground">Artikelname</th>
+                    <th className="text-left px-2 py-1 font-medium text-muted-foreground">{DE ? "Namensvorschlag" : "Naming idea"}</th>
+                    <th className="w-8 px-2 py-1"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {namingSuggestions.map((row, i) => (
+                    <tr key={i} className="border-t border-border">
+                      <td className="px-2 py-1 text-muted-foreground whitespace-nowrap">{row.warengruppe}</td>
+                      <td className="px-2 py-1 font-mono">{row.artikelname}</td>
+                      <td className="px-2 py-1 font-mono font-semibold text-blue-600">{row.suggestion}</td>
+                      <td className="px-2 py-1">
+                        <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground" onClick={() => copyToClipboard(row.suggestion)}>
+                          <Copy className="h-3 w-3" />
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                  {namingSuggestions.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="px-2 py-4 text-center text-muted-foreground">
+                        {DE ? "Keine Abweichungen gefunden." : "No deviations found."}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
-
-            {/* Results */}
-            {(localSuggestion || aiSuggestion) && (
-              <div className="space-y-2 pt-1 border-t border-border">
-                {localSuggestion && (
-                  <SuggestionResult
-                    label={DE ? "Lokal (Regelbasiert)" : "Local (rule-based)"}
-                    name={localSuggestion}
-                    conf={activePat ? (activePat.coverage >= 0.7 ? "high" : activePat.coverage >= 0.5 ? "medium" : "low") : "medium"}
-                    patternUsed={activeAiPat?.pat ?? activePat?.patternTemplate ?? ""}
-                    DE={DE}
-                    onCopy={copyToClipboard}
-                  />
-                )}
-                {aiSuggestion && (
-                  <SuggestionResult
-                    label={DE ? "KI-Vorschlag (Claude Haiku)" : "AI suggestion (Claude Haiku)"}
-                    name={aiSuggestion.name}
-                    conf={aiSuggestion.conf as "high" | "medium" | "low"}
-                    patternUsed={activeAiPat?.pat ?? activePat?.patternTemplate ?? ""}
-                    DE={DE}
-                    onCopy={copyToClipboard}
-                    isAi
-                  />
-                )}
-              </div>
-            )}
           </div>
 
           {/* ── Per-Warengruppe pattern list ──────────────────────────────── */}
@@ -311,42 +237,6 @@ export const NamingPatternModal = ({ open, onOpenChange, dataset, lang }: Naming
     </Dialog>
   );
 };
-
-// ── Suggestion result row ─────────────────────────────────────────────────────
-
-function SuggestionResult({
-  label, name, conf, patternUsed, DE, onCopy, isAi = false,
-}: {
-  label: string; name: string; conf: "high" | "medium" | "low";
-  patternUsed: string; DE: boolean; onCopy: (s: string) => void; isAi?: boolean;
-}) {
-  return (
-    <div className={`rounded-md border px-3 py-2 space-y-1 ${isAi ? "border-blue-500/30 bg-blue-500/5" : "border-border bg-muted/30"}`}>
-      <div className="flex items-center gap-2">
-        <span className="text-[11px] text-muted-foreground">{label}</span>
-        <Badge variant="outline" className={`text-[10px] h-4 ${CONF_COLORS[conf]}`}>
-          {DE ? CONF_DE[conf] : conf}
-        </Badge>
-        {conf === "low" && (
-          <span className="text-[11px] text-amber-600">
-            {DE ? "— Ergebnis bitte manuell prüfen" : "— verify manually"}
-          </span>
-        )}
-      </div>
-      <div className="flex items-center gap-2">
-        <span className="font-mono font-semibold text-sm">{name}</span>
-        <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground" onClick={() => onCopy(name)}>
-          <Copy className="h-3 w-3" />
-        </Button>
-      </div>
-      {patternUsed && (
-        <p className="text-[11px] text-muted-foreground">
-          {DE ? "Muster:" : "Pattern:"} <span className="font-mono">{patternUsed}</span>
-        </p>
-      )}
-    </div>
-  );
-}
 
 // ── Per-Warengruppe card ──────────────────────────────────────────────────────
 
