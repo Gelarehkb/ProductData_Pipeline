@@ -310,6 +310,17 @@ export const groesseTranslations: Record<string, string> = {
   "116 cm (6J)": "116 cm (6Y)",
   "120 cm (6J)": "120 cm (6Y)",
   "128 cm (6J)": "128 cm (6Y)",
+  // Accessories sizing (age equivalent) — same in both languages
+  "T0 (0-1M)": "T0 (0-1M)",
+  "T1 (1-3M)": "T1 (1-3M)",
+  "T2 (6-12M)": "T2 (6-12M)",
+  "T3 (12-24M)": "T3 (12-24M)",
+  "T4 (36-48M)": "T4 (36-48M)",
+  "S1 (0-3M)": "S1 (0-3M)",
+  "S2 (3-6M)": "S2 (3-6M)",
+  "S3 (6-12M)": "S3 (6-12M)",
+  "S4 (12-24M)": "S4 (12-24M)",
+  "S5 (36-48M)": "S5 (36-48M)",
 };
 
 // Helper: get display text for a German dropdown value
