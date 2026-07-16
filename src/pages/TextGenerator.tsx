@@ -636,10 +636,10 @@ export default function TextGenerator() {
   const totalWidth = COLUMNS.reduce((s, c) => s + c.width, 0) + 40;
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="h-screen bg-background flex flex-col">
 
       {/* ── Top bar ─────────────────────────────────────────────────────────── */}
-      <div className="sticky top-0 z-20 bg-background border-b border-border px-4 py-2 flex flex-wrap items-center gap-3">
+      <div className="shrink-0 bg-background border-b border-border px-4 py-2 flex flex-wrap items-center gap-3">
         <a href="/" className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0">
           <ArrowLeft className="h-4 w-4" />
           {lang === "DE" ? "Zurück" : "Back"}
@@ -703,7 +703,7 @@ export default function TextGenerator() {
       </div>
 
       {/* ── Table ───────────────────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-x-auto"
+      <div className="flex-1 overflow-auto"
         onMouseLeave={() => setIsSelecting(false)}
       >
         <table
@@ -716,7 +716,7 @@ export default function TextGenerator() {
           </colgroup>
 
           {/* Sticky header */}
-          <thead className="sticky top-[49px] z-10">
+          <thead className="sticky top-0 z-10">
             <tr>
               <th className="border border-[hsl(0,0%,85%)] bg-muted px-2 py-1.5 text-left text-xs font-medium text-muted-foreground w-10 select-none">#</th>
               {COLUMNS.map(c => (
@@ -846,7 +846,7 @@ export default function TextGenerator() {
       </div>
 
       {/* ── Footer ──────────────────────────────────────────────────────────── */}
-      <div className="sticky bottom-0 bg-background border-t border-border px-4 py-1.5 flex items-center gap-4 text-xs text-muted-foreground">
+      <div className="shrink-0 bg-background border-t border-border px-4 py-1.5 flex items-center gap-4 text-xs text-muted-foreground">
         <span>{rows.length} {lang === "DE" ? "Zeilen" : "rows"}</span>
         {selection.length > 0 && (
           <span>{selection.length} {lang === "DE" ? "Zellen ausgewählt" : "cells selected"}</span>

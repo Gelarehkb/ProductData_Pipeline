@@ -6,6 +6,10 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Switch } from "@/components/ui/switch";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Download, Trash2, ClipboardPaste, Undo2, Sparkles, Loader2, Globe, Plus, Upload, FolderTree, Eye, RotateCcw } from "lucide-react";
 import { MerkmaleMultiSelect } from "@/components/MerkmaleMultiSelect";
 import { useToast } from "@/hooks/use-toast";
@@ -653,6 +657,7 @@ const Index = () => {
     setCategoryPreviewOpen(false);
     toast({ title: lang === "DE" ? "Daten geleert" : "Data cleared", description: lang === "DE" ? "Alle eingefügten Inhalte wurden entfernt." : "All pasted content has been removed." });
   }, [rowCount, lang, toast]);
+  const [clearDataConfirmOpen, setClearDataConfirmOpen] = useState(false);
   const lastEditedCellRef = useRef<{ id: string; field: string } | null>(null);
   const [discount, setDiscount] = useState<string>("");
   const [selection, setSelection] = useState<CellPosition[]>([]);
@@ -702,9 +707,12 @@ const Index = () => {
   const handleJtlImport = useCallback(async (file: File) => {
     try {
       const buf = await file.arrayBuffer();
-      // cp1252 default for JTL/Ameise exports; fall back to UTF-8 on replacement chars
-      let text = new TextDecoder("windows-1252").decode(buf);
-      if (text.includes("�")) text = new TextDecoder("utf-8").decode(buf);
+      // Try UTF-8 first; invalid byte sequences (e.g. real cp1252 exports) surface as
+      // the replacement char, which is when we fall back to windows-1252. Decoding
+      // cp1252 first doesn't work: UTF-8 bytes are still "valid" cp1252, so a genuine
+      // UTF-8 file with umlauts would silently come out as mojibake instead.
+      let text = new TextDecoder("utf-8").decode(buf);
+      if (text.includes("�")) text = new TextDecoder("windows-1252").decode(buf);
       text = jtlStripBom(text);
       const delimiter = jtlDetectDelimiter(text);
       const allRows = jtlParseCsv(text, delimiter);
@@ -2472,7 +2480,7 @@ const Index = () => {
               {lang === "DE" ? "Datei importieren" : "Import file"}
             </Button>
             <Button
-              onClick={handleClearData}
+              onClick={() => setClearDataConfirmOpen(true)}
               variant="outline"
               size="sm"
               className="gap-1.5 text-muted-foreground hover:text-destructive hover:border-destructive/50"
@@ -2480,6 +2488,29 @@ const Index = () => {
               <RotateCcw className="h-4 w-4" />
               {lang === "DE" ? "Daten leeren" : "Clear data"}
             </Button>
+            <AlertDialog open={clearDataConfirmOpen} onOpenChange={setClearDataConfirmOpen}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>
+                    {lang === "DE" ? "Alle Daten wirklich leeren?" : "Really clear all data?"}
+                  </AlertDialogTitle>
+                  <AlertDialogDescription>
+                    {lang === "DE"
+                      ? "Alle eingegebenen Zeilen werden entfernt. Dies kann nicht rückgängig gemacht werden."
+                      : "All entered rows will be removed. This cannot be undone."}
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>{lang === "DE" ? "Abbrechen" : "Cancel"}</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={handleClearData}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    {lang === "DE" ? "Daten leeren" : "Clear data"}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
           <div className="flex items-center gap-2">
             <a href="/text-generator">
