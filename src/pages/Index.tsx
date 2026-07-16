@@ -1557,18 +1557,21 @@ const Index = () => {
       }
       
       if (isInputFocused) return;
-      
+
       // Check if we're in a table input that is actively focused (user is editing text)
       const isTableInput = (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') && target.closest('table');
-      
+      // A drag/shift-extended range still ends up focusing the last cell's input —
+      // only treat it as "just editing one cell" when a single cell is selected.
+      const isSingleCellEdit = isTableInput && selection.length <= 1;
+
       if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
-        if (isTableInput) return; // Let browser handle native copy in focused input
+        if (isSingleCellEdit) return; // Let browser handle native copy in focused input
         if (selection.length > 0) {
           e.preventDefault();
           handleCopySelection();
         }
       } else if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
-        if (isTableInput) return; // Let browser handle native paste in focused input
+        if (isSingleCellEdit) return; // Let browser handle native paste in focused input
         e.preventDefault();
         if (selection.length > 0) {
           handlePasteSelection();
@@ -1579,7 +1582,7 @@ const Index = () => {
         e.preventDefault();
         handleUndo();
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (isTableInput) return; // Let browser handle native delete in focused input
+        if (isSingleCellEdit) return; // Let browser handle native delete in focused input
         if (selection.length >= 1) {
           e.preventDefault();
           handleDeleteSelection();
