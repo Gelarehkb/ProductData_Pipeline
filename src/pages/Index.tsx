@@ -589,6 +589,34 @@ const Index = () => {
   );
   const [history, setHistory] = useState<ClothRow[][]>([]);
 
+  // A column-visibility checkbox is forced on (and can't be unchecked) whenever any
+  // row already has a value in that column — hiding the column would otherwise hide
+  // data silently. Once every cell is empty again, the checkbox is free to toggle.
+  const kollektionHasData = useMemo(() => rows.some(r => r.Collection.trim() !== ""), [rows]);
+  const measurementHasData = useMemo(() => rows.some(r => r.Measurement.trim() !== ""), [rows]);
+  const infoMaterialHasData = useMemo(() => rows.some(r => r.InfoMaterial.trim() !== ""), [rows]);
+  const descriptionHasData = useMemo(() => rows.some(r => r.Description.trim() !== ""), [rows]);
+  const merkmaleHasData = useMemo(
+    () => rows.some(r => (r.MerkmaleGroesse || "").trim() !== "" || (r.MerkmaleFarbe || "").trim() !== "" || (r.MerkmaleArt || "").trim() !== ""),
+    [rows]
+  );
+
+  useEffect(() => {
+    if (kollektionHasData) setShowKollektion(true);
+  }, [kollektionHasData]);
+  useEffect(() => {
+    if (measurementHasData) setShowMeasurement(true);
+  }, [measurementHasData]);
+  useEffect(() => {
+    if (infoMaterialHasData) setShowInfoMaterial(true);
+  }, [infoMaterialHasData]);
+  useEffect(() => {
+    if (descriptionHasData) setShowDescription(true);
+  }, [descriptionHasData]);
+  useEffect(() => {
+    if (merkmaleHasData) setMerkmale(true);
+  }, [merkmaleHasData]);
+
   const handleClearData = useCallback(() => {
     const count = Math.max(1, parseInt(rowCount, 10) || 10);
     setRows(Array.from({ length: count }, () => createEmptyRow()));
@@ -2464,25 +2492,25 @@ const Index = () => {
                 <Checkbox id="vaterstat" checked={vaterstat} onCheckedChange={(checked) => setVaterstat(checked === true)} />
                 <Label htmlFor="vaterstat" className="text-xs font-normal cursor-pointer">{t("vaterStatus", lang)}</Label>
               </div>
-              <div className="flex items-center gap-1.5">
-                <Checkbox id="merkmale" checked={merkmale} onCheckedChange={(checked) => setMerkmale(checked === true)} />
-                <Label htmlFor="merkmale" className="text-xs font-normal cursor-pointer">{t("merkmale", lang)}</Label>
+              <div className="flex items-center gap-1.5" title={merkmaleHasData ? (lang === "DE" ? "Enthält Daten — erst alle Zellen leeren, um auszublenden" : "Contains data — clear all cells to hide") : undefined}>
+                <Checkbox id="merkmale" checked={merkmale} disabled={merkmaleHasData} onCheckedChange={(checked) => setMerkmale(checked === true)} />
+                <Label htmlFor="merkmale" className={`text-xs font-normal ${merkmaleHasData ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}>{t("merkmale", lang)}</Label>
               </div>
-              <div className="flex items-center gap-1.5">
-                <Checkbox id="kollektion" checked={showKollektion} onCheckedChange={(checked) => setShowKollektion(checked === true)} />
-                <Label htmlFor="kollektion" className="text-xs font-normal cursor-pointer">{t("colCollection", lang)}</Label>
+              <div className="flex items-center gap-1.5" title={kollektionHasData ? (lang === "DE" ? "Enthält Daten — erst alle Zellen leeren, um auszublenden" : "Contains data — clear all cells to hide") : undefined}>
+                <Checkbox id="kollektion" checked={showKollektion} disabled={kollektionHasData} onCheckedChange={(checked) => setShowKollektion(checked === true)} />
+                <Label htmlFor="kollektion" className={`text-xs font-normal ${kollektionHasData ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}>{t("colCollection", lang)}</Label>
               </div>
-              <div className="flex items-center gap-1.5">
-                <Checkbox id="measurement" checked={showMeasurement} onCheckedChange={(checked) => setShowMeasurement(checked === true)} />
-                <Label htmlFor="measurement" className="text-xs font-normal cursor-pointer">{t("colMeasurement", lang)}</Label>
+              <div className="flex items-center gap-1.5" title={measurementHasData ? (lang === "DE" ? "Enthält Daten — erst alle Zellen leeren, um auszublenden" : "Contains data — clear all cells to hide") : undefined}>
+                <Checkbox id="measurement" checked={showMeasurement} disabled={measurementHasData} onCheckedChange={(checked) => setShowMeasurement(checked === true)} />
+                <Label htmlFor="measurement" className={`text-xs font-normal ${measurementHasData ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}>{t("colMeasurement", lang)}</Label>
               </div>
-              <div className="flex items-center gap-1.5">
-                <Checkbox id="infomaterial" checked={showInfoMaterial} onCheckedChange={(checked) => setShowInfoMaterial(checked === true)} />
-                <Label htmlFor="infomaterial" className="text-xs font-normal cursor-pointer">{t("colInfoMaterial", lang)}</Label>
+              <div className="flex items-center gap-1.5" title={infoMaterialHasData ? (lang === "DE" ? "Enthält Daten — erst alle Zellen leeren, um auszublenden" : "Contains data — clear all cells to hide") : undefined}>
+                <Checkbox id="infomaterial" checked={showInfoMaterial} disabled={infoMaterialHasData} onCheckedChange={(checked) => setShowInfoMaterial(checked === true)} />
+                <Label htmlFor="infomaterial" className={`text-xs font-normal ${infoMaterialHasData ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}>{t("colInfoMaterial", lang)}</Label>
               </div>
-              <div className="flex items-center gap-1.5">
-                <Checkbox id="description" checked={showDescription} onCheckedChange={(checked) => setShowDescription(checked === true)} />
-                <Label htmlFor="description" className="text-xs font-normal cursor-pointer">{lang === "DE" ? "Beschreibung" : "Description"}</Label>
+              <div className="flex items-center gap-1.5" title={descriptionHasData ? (lang === "DE" ? "Enthält Daten — erst alle Zellen leeren, um auszublenden" : "Contains data — clear all cells to hide") : undefined}>
+                <Checkbox id="description" checked={showDescription} disabled={descriptionHasData} onCheckedChange={(checked) => setShowDescription(checked === true)} />
+                <Label htmlFor="description" className={`text-xs font-normal ${descriptionHasData ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}>{lang === "DE" ? "Beschreibung" : "Description"}</Label>
               </div>
             </div>
           </div>
