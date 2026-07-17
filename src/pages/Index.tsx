@@ -10,7 +10,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Download, Trash2, ClipboardPaste, Undo2, Sparkles, Loader2, Globe, Plus, Upload, FolderTree, Eye, RotateCcw } from "lucide-react";
+import { Download, Trash2, ClipboardPaste, Undo2, Sparkles, Loader2, Globe, Plus, Upload, FolderTree, Eye, RotateCcw, Percent } from "lucide-react";
 import { MerkmaleMultiSelect } from "@/components/MerkmaleMultiSelect";
 import { useToast } from "@/hooks/use-toast";
 import { FindReplaceDialog } from "@/components/FindReplaceDialog";
@@ -443,6 +443,9 @@ const Index = () => {
   const [aufSe, setAufSe] = useState("");
   const [lieferzeit, setLieferzeit] = useState("14");
   const [verfuegbarkeit, setVerfuegbarkeit] = useState("3 - 5 Werktage");
+  // Separate from the "Rabatt %" summary field below the grid: this one actually
+  // reduces EK, VK, and Liefer. EK in the final GESAMT export.
+  const [ekVkDiscount, setEkVkDiscount] = useState("");
   const verfuegbarkeitOptions = [
     "2 - 5 Werktage",
     "3 - 7 Werktage",
@@ -622,6 +625,7 @@ const Index = () => {
     setRows(Array.from({ length: count }, () => createEmptyRow()));
     setHistory([]);
     setDiscount("");
+    setEkVkDiscount("");
     setSelection([]);
     setSelectionStart(null);
     setHanFixed({});
@@ -1495,8 +1499,8 @@ const Index = () => {
   }, [handleCopySelection, handlePasteSelection, handleDeleteSelection, handlePaste, selection, handleUndo]);
 
   // Select entire column
-  const handleColumnSelect = (colIndex: number, e: React.MouseEvent) => {
-    e.preventDefault();
+  const handleColumnSelect = (colIndex: number, e?: React.MouseEvent) => {
+    e?.preventDefault();
     const positions: CellPosition[] = rows.map((_, rowIndex) => ({ row: rowIndex, col: colIndex }));
     setSelection(positions);
     setSelectionStart({ row: 0, col: colIndex });
@@ -2227,13 +2231,15 @@ const Index = () => {
     const Lieferstatus = verfuegbarkeit || "3 - 5 Werktage";
     const LieferzeitVal = parseInt(lieferzeit) || 14;
 
-    // Rabatt % also reduces EK/VK in the exported file (grid values themselves stay untouched).
-    const discountPct = parseFloat(discount.replace(",", "."));
+    // EK/VK Rabatt % reduces EK, VK, and Liefer. EK in the exported file (grid
+    // values themselves stay untouched). This is separate from the Rabatt %
+    // in the bottom toolbar, which only affects the displayed order total.
+    const ekVkDiscountPct = parseFloat(ekVkDiscount.replace(",", "."));
     const applyDiscount = (raw: string): string => {
-      if (isNaN(discountPct) || discountPct <= 0 || discountPct > 100) return raw;
+      if (isNaN(ekVkDiscountPct) || ekVkDiscountPct <= 0 || ekVkDiscountPct > 100) return raw;
       const n = parseFloat((raw || "").replace(",", "."));
       if (isNaN(n)) return raw;
-      return (n * (1 - discountPct / 100)).toFixed(2).replace(".", ",");
+      return (n * (1 - ekVkDiscountPct / 100)).toFixed(2).replace(".", ",");
     };
 
     // Group by combined name + color
@@ -2410,6 +2416,12 @@ const Index = () => {
                 {lang === "DE" ? "Texte" : "Texts"}
               </Button>
             </a>
+            <a href="/discounts">
+              <Button variant="outline" size="sm" className="gap-1.5 text-xs">
+                <Percent className="h-3.5 w-3.5" />
+                Discounts
+              </Button>
+            </a>
             <Button
               variant="outline"
               size="sm"
@@ -2487,6 +2499,27 @@ const Index = () => {
               </Select>
             </div>
 
+            <div className="space-y-1">
+              <Label htmlFor="ekVkDiscount" className="text-xs whitespace-nowrap">
+                {lang === "DE" ? "EK/VK Rabatt %" : "EK/VK discount %"}
+              </Label>
+              <Input
+                id="ekVkDiscount"
+                type="text"
+                inputMode="decimal"
+                value={ekVkDiscount}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "" || /^\d{0,3}([.,]\d{0,2})?$/.test(v)) setEkVkDiscount(v);
+                }}
+                placeholder="0"
+                title={lang === "DE"
+                  ? "Reduziert EK, VK und Liefer. EK um diesen Prozentsatz im finalen GESAMT-Export (die Werte im Raster bleiben unverändert)."
+                  : "Reduces EK, VK, and Liefer. EK by this percentage in the final GESAMT export (grid values stay unchanged)."}
+                className="w-20"
+              />
+            </div>
+
             <div className="flex items-center gap-4 pb-2">
               <div className="flex items-center gap-1.5">
                 <Checkbox id="vaterstat" checked={vaterstat} onCheckedChange={(checked) => setVaterstat(checked === true)} />
@@ -2545,7 +2578,10 @@ const Index = () => {
                     >
                       <div className="flex items-center justify-between">
                         {col.isDropdown && col.dropdownOptions ? (
-                          <Select onValueChange={(value) => handleHeaderDropdownChange(col.key, value)}>
+                          <Select
+                            onValueChange={(value) => handleHeaderDropdownChange(col.key, value)}
+                            onOpenChange={(open) => { if (open) handleColumnSelect(colIndex); }}
+                          >
                             <SelectTrigger className="h-7 bg-white border-border text-sm font-semibold">
                               <SelectValue placeholder={col.label} />
                             </SelectTrigger>
@@ -2874,9 +2910,6 @@ const Index = () => {
               value={discount}
               onChange={handleDiscountChange}
               placeholder="0"
-              title={lang === "DE"
-                ? "Reduziert EK und VK um diesen Prozentsatz im CSV-Export (die Werte im Raster bleiben unverändert)."
-                : "Reduces EK and VK by this percentage in the CSV export (grid values stay unchanged)."}
               className="h-5 w-12 px-1 text-xs text-center"
             />
             {parseFloat(discount.replace(",", ".")) > 0 && (
@@ -2963,11 +2996,11 @@ const Index = () => {
                   {t("csvExport", lang)}
                 </Button>
               </TooltipTrigger>
-              {parseFloat(discount.replace(",", ".")) > 0 && (
+              {parseFloat(ekVkDiscount.replace(",", ".")) > 0 && (
                 <TooltipContent side="top">
                   {lang === "DE"
-                    ? `EK und VK werden im Export um ${discount}% reduziert.`
-                    : `EK and VK will be reduced by ${discount}% in the export.`}
+                    ? `EK und VK werden im Export um ${ekVkDiscount}% reduziert.`
+                    : `EK and VK will be reduced by ${ekVkDiscount}% in the export.`}
                 </TooltipContent>
               )}
             </Tooltip>
