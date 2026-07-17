@@ -425,14 +425,23 @@ app.post('/api/extract-product-types', async (req, res) => {
     const { names } = req.body;
     if (!names || !Array.isArray(names) || names.length === 0) throw new Error('names array is required');
 
-    const prompt = `You extract the product-type name from German/English children's-store article names.
+    const prompt = `You extract ONLY the short, generic product-type keyword from German/English children's-store article names — nothing else.
 
 Rules:
-- Return ONLY the word(s) that describe WHAT THE OBJECT IS (e.g. "Schlafsack", "Wollmütze", "Strampler", "Sleeping Bag").
-- Ignore color, size, material, brand, and variant/model details.
-- The product type is usually the first or second word of the name.
+- Return ONLY the 1-2 word(s) that name WHAT THE OBJECT IS as a generic category (e.g. "Balaclava", "Hut", "Schlafsack", "Bucket Hat").
+- STRIP EVERYTHING ELSE: brand/collection names, material ("gestrickt", "Merino-W.", "Bio-Baumwolle"), color ("brown", "camel", "dark navy"), pattern/print names ("Liberty", "may field", "michelle"), size, and any other variant/model detail — even if it directly follows the product type in the name.
+- Never return a multi-word result just because those words appeared together in the source name. When in doubt, return the single shortest generic noun.
 - Use Title Case.
 - You MUST return exactly ${names.length} results, one per input item, in the same order.
+
+Examples:
+"Balaclava gestrickt Merino-W. Lava brown" → "Balaclava"
+"Balaclava gestrickt Merino-W. Lava camel" → "Balaclava"
+"Hat Summer Muslin dark navy" → "Hat"
+"Sonnenhut Liberty may field" → "Sonnenhut"
+"Sonnenhut Liberty michelle" → "Sonnenhut"
+"Schlafsack Merino Blau" → "Schlafsack"
+"Bucket Hat Denim washed" → "Bucket Hat"
 
 Items (${names.length} total):
 ${names.map((n, i) => `${i + 1}. ${n}`).join('\n')}

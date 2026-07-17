@@ -87,18 +87,6 @@ function normalizeHeader(h: string): string {
   return h.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-// 0-based column index → Excel column letter (0 → "A", 25 → "Z", 26 → "AA", ...).
-function excelColumnLetter(index: number): string {
-  let n = index + 1;
-  let letters = "";
-  while (n > 0) {
-    const rem = (n - 1) % 26;
-    letters = String.fromCharCode(65 + rem) + letters;
-    n = Math.floor((n - 1) / 26);
-  }
-  return letters;
-}
-
 // ── CSV cell escaping for export (semicolon-delimited, matches the rest of the app) ──
 function escapeCsvCell(v: string): string {
   let s = String(v ?? "");
@@ -211,12 +199,17 @@ export default function Discounts() {
         });
         return;
       }
-      // Brutto-VK always sits at a fixed column position in the export now
-      // (it's one of the 5 projected source columns), so its Excel column
-      // letter is known ahead of time rather than searched for.
-      const multiplier = (1 - pct / 100).toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
-      const colLetter = excelColumnLetter(VK_OUTPUT_INDEX);
-      sonderpreisPerRow = rows.map((_, i) => `=${colLetter}${i + 2}*${multiplier}`);
+      // Compute the actual reduced price per row rather than writing an Excel
+      // formula string — formulas render as literal text unless the CSV is
+      // opened in a way that re-parses leading "=" as a formula, which isn't
+      // reliable across import methods/apps.
+      const multiplier = 1 - pct / 100;
+      sonderpreisPerRow = rows.map(row => {
+        const vkRaw = row[VK_OUTPUT_INDEX] ?? "";
+        const vk = parseFloat(vkRaw.replace(",", "."));
+        if (isNaN(vk)) return "";
+        return (vk * multiplier).toFixed(2).replace(".", ",");
+      });
     }
 
     setExtraValues(prev => prev.map((_, i) => ({
@@ -334,7 +327,7 @@ export default function Discounts() {
                     value={globalSonderpreis}
                     onChange={(e) => setGlobalSonderpreis(e.target.value)}
                     placeholder="z.B. 5"
-                    title="Wird als Excel-Formel in die Spalte 'Sonderpreis Endkunden brutto' eingetragen: Brutto-VK * (1 - Rabatt%), z.B. 5% → VK*0,95."
+                    title="Berechnet den reduzierten Preis je Zeile für 'Sonderpreis Endkunden brutto': Brutto-VK * (1 - Rabatt%), z.B. 5% Rabatt auf 49,99 → 47,49."
                     className="w-32"
                   />
                   <p className="text-[11px] text-muted-foreground">= Brutto-VK × (1 − %)</p>
