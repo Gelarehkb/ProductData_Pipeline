@@ -17,10 +17,6 @@ import { FindReplaceDialog } from "@/components/FindReplaceDialog";
 import { ImportDialog, type ImportTargetField } from "@/components/ImportDialog";
 import { TextPreviewModal, type TextPreviewRow } from "@/components/TextPreviewModal";
 import { CategoryPreviewModal, type CategoryPreviewRow } from "@/components/CategoryPreviewModal";
-import { JtlCheckModal, runJtlCheck, type JtlCheckResult, type JtlRow } from "@/components/JtlCheckModal";
-import { NamingPatternModal } from "@/components/NamingPatternModal";
-import { ArticlePreCheckModal, type PreCheckCandidate } from "@/components/ArticlePreCheckModal";
-import { ShieldCheck, BookOpen, ClipboardCheck } from "lucide-react";
 async function apiFetch(fn: string, body: object): Promise<{ data: unknown; error: Error | null }> {
   try {
     const res = await fetch(`/api/${fn}`, {
@@ -40,51 +36,6 @@ import { type Lang, t, warengruppeTranslations, farbeTranslations, artTranslatio
 interface CellPosition {
   row: number;
   col: number;
-}
-
-// ---- CSV utilities for JTL import ----
-function jtlParseCsv(text: string, delimiter: string): string[][] {
-  const rows: string[][] = [];
-  let field = "";
-  let row: string[] = [];
-  let inQuotes = false;
-  let i = 0;
-  while (i < text.length) {
-    const ch = text[i];
-    if (inQuotes) {
-      if (ch === '"') {
-        if (text[i + 1] === '"') { field += '"'; i += 2; continue; }
-        inQuotes = false; i++; continue;
-      }
-      field += ch; i++; continue;
-    }
-    if (ch === '"') { inQuotes = true; i++; continue; }
-    if (ch === delimiter) { row.push(field); field = ""; i++; continue; }
-    if (ch === "\r") { i++; continue; }
-    if (ch === "\n") { row.push(field); rows.push(row); row = []; field = ""; i++; continue; }
-    field += ch; i++;
-  }
-  if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row); }
-  return rows;
-}
-
-function jtlDetectDelimiter(text: string): string {
-  const sample = text.slice(0, 64 * 1024);
-  let inQ = false;
-  const counts: Record<string, number> = { ";": 0, ",": 0, "\t": 0, "|": 0 };
-  for (let i = 0; i < sample.length; i++) {
-    const c = sample[i];
-    if (c === '"') { if (inQ && sample[i + 1] === '"') { i++; continue; } inQ = !inQ; continue; }
-    if (!inQ && counts[c] !== undefined) counts[c]++;
-  }
-  // Default to semicolon for JTL exports; only override if another delimiter clearly dominates
-  const semi = counts[";"];
-  const best = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
-  return best[1] > semi * 2 ? best[0] : ";";
-}
-
-function jtlStripBom(s: string): string {
-  return s.charCodeAt(0) === 0xfeff ? s.slice(1) : s;
 }
 
 interface ClothRow {
@@ -688,103 +639,6 @@ const Index = () => {
   // Maps artikelnummer → productName so onConfirm can save back to confirmedCategories
   const [categoryArtikelToName, setCategoryArtikelToName] = useState<Record<string, string>>({});
 
-  const [jtlDataset, setJtlDataset] = useState<JtlRow[]>(() => {
-    try {
-      const cached = sessionStorage.getItem("jtlDatasetCache");
-      return cached ? (JSON.parse(cached) as JtlRow[]) : [];
-    } catch { return []; }
-  });
-  const [jtlCachedFileName, setJtlCachedFileName] = useState<string>(() => {
-    try { return sessionStorage.getItem("jtlDatasetFileName") ?? ""; } catch { return ""; }
-  });
-  const jtlFileInputRef = useRef<HTMLInputElement>(null);
-  const [jtlCheckOpen, setJtlCheckOpen] = useState(false);
-  const [jtlCheckResults, setJtlCheckResults] = useState<JtlCheckResult[]>([]);
-  const [namingPatternOpen, setNamingPatternOpen] = useState(false);
-  const [preCheckOpen, setPreCheckOpen] = useState(false);
-  const [preCheckCandidates, setPreCheckCandidates] = useState<PreCheckCandidate[]>([]);
-
-  const handleJtlImport = useCallback(async (file: File) => {
-    try {
-      const buf = await file.arrayBuffer();
-      // Try UTF-8 first; invalid byte sequences (e.g. real cp1252 exports) surface as
-      // the replacement char, which is when we fall back to windows-1252. Decoding
-      // cp1252 first doesn't work: UTF-8 bytes are still "valid" cp1252, so a genuine
-      // UTF-8 file with umlauts would silently come out as mojibake instead.
-      let text = new TextDecoder("utf-8").decode(buf);
-      if (text.includes("�")) text = new TextDecoder("windows-1252").decode(buf);
-      text = jtlStripBom(text);
-      const delimiter = jtlDetectDelimiter(text);
-      const allRows = jtlParseCsv(text, delimiter);
-      if (allRows.length < 2) {
-        toast({ title: "Keine Daten", description: "Die Datei enthält keine verwertbaren Zeilen.", variant: "destructive" });
-        return;
-      }
-      const headers = allRows[0].map(h => h.trim().toLowerCase());
-      const colIdx = (names: string[]): number => {
-        for (const name of names) {
-          const idx = headers.findIndex(h => h === name || h.includes(name));
-          if (idx !== -1) return idx;
-        }
-        return -1;
-      };
-      const iInternerSchluessel = colIdx(["interner schlüssel", "interner schluessel", "schlüssel"]);
-      const iArtikelnummer = colIdx(["artikelnummer"]);
-      const iVaterartikel = colIdx(["identifizierungsspalte vaterartikel", "vaterartikel"]);
-      const iArtikelname = colIdx(["artikelname"]);
-      const iWarengruppe = colIdx(["warengruppe"]);
-      const iGtin = colIdx(["gtin", "ean"]);
-      const iHan = colIdx(["han"]);
-      const parsed: JtlRow[] = [];
-      for (let r = 1; r < allRows.length; r++) {
-        const row = allRows[r];
-        if (row.every(c => c.trim() === "")) continue;
-        parsed.push({
-          internerSchluessel: iInternerSchluessel >= 0 ? (row[iInternerSchluessel] ?? "").trim() : "",
-          artikelnummer: iArtikelnummer >= 0 ? (row[iArtikelnummer] ?? "").trim() : "",
-          vaterartikel: iVaterartikel >= 0 ? (row[iVaterartikel] ?? "").trim() : "",
-          artikelname: iArtikelname >= 0 ? (row[iArtikelname] ?? "").trim() : "",
-          warengruppe: iWarengruppe >= 0 ? (row[iWarengruppe] ?? "").trim() : "",
-          gtin: iGtin >= 0 ? (row[iGtin] ?? "").trim() : "",
-          han: iHan >= 0 ? (row[iHan] ?? "").trim() : "",
-        });
-      }
-      setJtlDataset(parsed);
-      setJtlCachedFileName(file.name);
-      try {
-        sessionStorage.setItem("jtlDatasetCache", JSON.stringify(parsed));
-        sessionStorage.setItem("jtlDatasetFileName", file.name);
-      } catch { /* quota exceeded — skip caching */ }
-      toast({ title: `${parsed.length} Artikel geladen`, description: `JTL-Referenzdatei: ${file.name}` });
-    } catch (err) {
-      toast({ title: "Fehler beim Importieren", description: String(err), variant: "destructive" });
-    }
-  }, [toast]);
-
-  const clearJtlDataset = useCallback(() => {
-    setJtlDataset([]);
-    setJtlCachedFileName("");
-    try {
-      sessionStorage.removeItem("jtlDatasetCache");
-      sessionStorage.removeItem("jtlDatasetFileName");
-    } catch { /* ignore */ }
-  }, []);
-
-  const handleJtlCheck = useCallback(() => {
-    if (jtlDataset.length === 0) {
-      toast({ title: lang === "DE" ? "Keine Referenzdaten" : "No reference data", description: lang === "DE" ? "Bitte zuerst eine JTL-Datei laden." : "Please load a JTL file first.", variant: "destructive" });
-      return;
-    }
-    const candidates = rows
-      .map((r, i) => ({ rowIndex: i, clothName: getClothName(r), han: r.HAN, gtin: r.EAN, warengruppe: r.WarenGruppe }))
-      .filter(c => c.han.trim() !== "" || c.gtin.trim() !== "");
-    if (candidates.length === 0) {
-      toast({ title: lang === "DE" ? "Keine prüfbaren Zeilen" : "No checkable rows", description: lang === "DE" ? "Fülle HAN oder GTIN/EAN Felder aus." : "Fill in HAN or GTIN/EAN fields.", variant: "destructive" });
-      return;
-    }
-    setJtlCheckResults(runJtlCheck(candidates, jtlDataset));
-    setJtlCheckOpen(true);
-  }, [rows, jtlDataset, lang, toast]);
 
   const handleAIClassify = async () => {
     const filledRows = rows.filter(r => getClothName(r).trim() !== "");
@@ -2531,59 +2385,6 @@ const Index = () => {
           </div>
         </div>
         
-        {/* JTL Reference Import */}
-        <div className="bg-card border border-border rounded-lg px-4 py-3 mb-4 flex items-center gap-3">
-          <input
-            ref={jtlFileInputRef}
-            type="file"
-            accept=".csv,.txt"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) handleJtlImport(f);
-              e.target.value = "";
-            }}
-          />
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5 shrink-0"
-            onClick={() => jtlFileInputRef.current?.click()}
-          >
-            <Upload className="h-4 w-4" />
-            {lang === "DE" ? "JTL-Artikeldaten laden" : "Load JTL article data"}
-          </Button>
-          {jtlDataset.length > 0 ? (
-            <span className="text-sm text-muted-foreground flex items-center gap-2 min-w-0">
-              <span className="shrink-0">
-                <span className="font-medium text-foreground">{jtlDataset.length.toLocaleString("de-DE")}</span>
-                {lang === "DE" ? " Artikel geladen" : " articles loaded"}
-              </span>
-              {jtlCachedFileName && (
-                <span
-                  className="text-xs text-muted-foreground/60 truncate max-w-[200px]"
-                  title={jtlCachedFileName}
-                >
-                  {jtlCachedFileName}
-                </span>
-              )}
-              <button
-                onClick={clearJtlDataset}
-                title={lang === "DE" ? "Referenzdaten entfernen" : "Remove reference data"}
-                className="shrink-0 text-muted-foreground/50 hover:text-destructive text-base leading-none"
-              >
-                ×
-              </button>
-            </span>
-          ) : (
-            <span className="text-sm text-muted-foreground">
-              {lang === "DE"
-                ? "JTL/Ameise-Exportdatei (.csv) als Referenz laden"
-                : "Load a JTL/Ameise export (.csv) as reference"}
-            </span>
-          )}
-        </div>
-
         {/* Input Controls */}
         <div className="bg-card border border-border rounded-lg p-4 mb-6">
           <div className="flex flex-wrap items-end gap-4">
@@ -3119,46 +2920,6 @@ const Index = () => {
             {t("csvExport", lang)}
           </Button>
 
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5"
-                  disabled={jtlDataset.length === 0}
-                  onClick={() => {
-                    const candidates: PreCheckCandidate[] = rows
-                      .map((r, i) => ({
-                        rowId: r.id,
-                        rowIndex: i,
-                        clothName: getClothName(r),
-                        han: r.HAN,
-                        gtin: r.EAN,
-                        warengruppe: r.WarenGruppe,
-                        itemName: r.ItemName,
-                        infoMaterial: r.InfoMaterial,
-                        collection: r.Collection,
-                      }))
-                      .filter(c => c.han.trim() || c.gtin.trim() || c.clothName.trim());
-                    setPreCheckCandidates(candidates);
-                    setPreCheckOpen(true);
-                  }}
-                >
-                  <ClipboardCheck className="h-3.5 w-3.5" />
-                  {lang === "DE" ? "Vorabprüfung" : "Pre-check"}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="top">
-                {jtlDataset.length === 0
-                  ? (lang === "DE" ? "Erst JTL-Datei laden" : "Load a JTL file first")
-                  : (lang === "DE" ? "Duplikate, Varianten & Namen prüfen" : "Check duplicates, variants & names")}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-
-          <div className="w-px h-5 bg-border" />
-
           {/* ── AI tools ── */}
           <Button variant="outline" size="sm" className="gap-1.5" onClick={handleAIClassify} disabled={isClassifying || isRetrying}>
             {isClassifying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
@@ -3183,56 +2944,6 @@ const Index = () => {
             </Tooltip>
           </TooltipProvider>
 
-          <div className="w-px h-5 bg-border" />
-
-          {/* ── JTL duplicate check ── */}
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5"
-                  onClick={handleJtlCheck}
-                  disabled={jtlDataset.length === 0}
-                >
-                  <ShieldCheck className="h-3.5 w-3.5" />
-                  {lang === "DE" ? "JTL Prüfen" : "JTL Check"}
-                  {jtlDataset.length > 0 && (
-                    <span className="text-[10px] text-muted-foreground">({jtlDataset.length.toLocaleString("de-DE")})</span>
-                  )}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="top">
-                {jtlDataset.length === 0
-                  ? (lang === "DE" ? "Erst JTL-Datei laden" : "Load a JTL file first")
-                  : (lang === "DE" ? "HAN/GTIN gegen JTL-Referenz prüfen" : "Check HAN/GTIN against JTL reference")}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-
-          {/* ── Naming pattern analysis ── */}
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5"
-                  onClick={() => setNamingPatternOpen(true)}
-                  disabled={jtlDataset.length === 0}
-                >
-                  <BookOpen className="h-3.5 w-3.5" />
-                  {lang === "DE" ? "Namensanalyse" : "Name patterns"}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="top">
-                {jtlDataset.length === 0
-                  ? (lang === "DE" ? "Erst JTL-Datei laden" : "Load a JTL file first")
-                  : (lang === "DE" ? "Namensstruktur pro Warengruppe analysieren" : "Analyze naming structure per product group")}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
         </div>
       </div>
       <ImportDialog open={importDialogOpen} onOpenChange={setImportDialogOpen} onImport={handleImportRows} lang={lang} />
@@ -3255,26 +2966,6 @@ const Index = () => {
         initialRows={categoryPreviewRows}
         lang={lang}
         onConfirm={handleCategoryConfirm}
-      />
-      <JtlCheckModal
-        open={jtlCheckOpen}
-        onOpenChange={setJtlCheckOpen}
-        results={jtlCheckResults}
-        lang={lang}
-      />
-      <NamingPatternModal
-        open={namingPatternOpen}
-        onOpenChange={setNamingPatternOpen}
-        dataset={jtlDataset}
-        lang={lang}
-      />
-      <ArticlePreCheckModal
-        open={preCheckOpen}
-        onOpenChange={setPreCheckOpen}
-        candidates={preCheckCandidates}
-        jtlDataset={jtlDataset}
-        lang={lang}
-        onReuploadJtl={() => jtlFileInputRef.current?.click()}
       />
     </div>
   );
