@@ -10,23 +10,17 @@ import { useToast } from "@/hooks/use-toast";
 // state or logic with the other pages. Nothing here is imported by, or imports
 // from, Index.tsx / TextGenerator.tsx / ArtikelAnlegen.tsx.
 
-// ── Expected source columns (warn only — never blocks the upload) ────────────
-const EXPECTED_COLUMNS = [
-  "Interner Schlüssel",
-  "Anmerkung",
-  "Aktiv",
-  "Überverkäufe möglich",
-  "Onlineshop aktiv",
-  "Sonderpreis",
-  "Erstellt am",
-  "Vaterartikel",
-  "Artikelnummer",
-  "Artikelname",
-  "HAN",
-  "EAN",
-  "Ø",
-  "Brutto-VK",
+// ── Source columns pulled from the uploaded file (everything else is dropped) ──
+// Each entry's aliases are matched against the uploaded header row, case/whitespace-
+// insensitively; the first match wins.
+const SOURCE_COLUMNS: { label: string; aliases: string[] }[] = [
+  { label: "Interner Schlüssel", aliases: ["interner schlüssel", "interner schluessel"] },
+  { label: "Artikelnummer", aliases: ["artikelnummer"] },
+  { label: "EAN/Barcode", aliases: ["ean/barcode", "ean", "barcode"] },
+  { label: "HAN", aliases: ["han"] },
+  { label: "Brutto-VK", aliases: ["brutto-vk", "brutto vk"] },
 ];
+const VK_OUTPUT_INDEX = SOURCE_COLUMNS.findIndex(c => c.label === "Brutto-VK");
 
 // ── New discount-import columns appended to the export ───────────────────────
 const NEW_COLUMNS = [
@@ -34,6 +28,7 @@ const NEW_COLUMNS = [
   "Sonderpreise aktivieren vom (Startdatum)",
   "Bis einschließlich (Enddatum)",
   "Bis Anzahl im Lager kleiner als",
+  "Erstelldatum",
 ] as const;
 
 interface ExtraRowValues {
@@ -92,6 +87,18 @@ function normalizeHeader(h: string): string {
   return h.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+// 0-based column index → Excel column letter (0 → "A", 25 → "Z", 26 → "AA", ...).
+function excelColumnLetter(index: number): string {
+  let n = index + 1;
+  let letters = "";
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    letters = String.fromCharCode(65 + rem) + letters;
+    n = Math.floor((n - 1) / 26);
+  }
+  return letters;
+}
+
 // ── CSV cell escaping for export (semicolon-delimited, matches the rest of the app) ──
 function escapeCsvCell(v: string): string {
   let s = String(v ?? "");
@@ -105,7 +112,8 @@ export default function Discounts() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [fileName, setFileName] = useState("");
-  const [headers, setHeaders] = useState<string[]>([]);
+  // Projected down to just SOURCE_COLUMNS, in that fixed order — everything else
+  // in the uploaded file is dropped, per the columns actually needed here.
   const [rows, setRows] = useState<string[][]>([]);
   const [extraValues, setExtraValues] = useState<ExtraRowValues[]>([]);
   const [missingColumns, setMissingColumns] = useState<string[] | null>(null);
@@ -118,18 +126,23 @@ export default function Discounts() {
   const hasData = rows.length > 0;
 
   const loadParsedTable = (parsedHeaders: string[], parsedRows: string[][], loadedFileName: string) => {
-    setHeaders(parsedHeaders);
-    setRows(parsedRows);
-    setExtraValues(parsedRows.map(() => emptyExtra()));
+    const normalizedIncoming = parsedHeaders.map(normalizeHeader);
+    const colIndices = SOURCE_COLUMNS.map(col =>
+      normalizedIncoming.findIndex(h => col.aliases.includes(h) || col.aliases.some(a => h.includes(a)))
+    );
+
+    const projectedRows = parsedRows.map(row => colIndices.map(idx => (idx >= 0 ? (row[idx] ?? "").trim() : "")));
+
+    setRows(projectedRows);
+    setExtraValues(projectedRows.map(() => emptyExtra()));
     setFileName(loadedFileName);
 
-    const normalizedIncoming = new Set(parsedHeaders.map(normalizeHeader));
-    const missing = EXPECTED_COLUMNS.filter(col => !normalizedIncoming.has(normalizeHeader(col)));
+    const missing = SOURCE_COLUMNS.filter((_, i) => colIndices[i] === -1).map(c => c.label);
     setMissingColumns(missing);
 
     toast({
       title: "Datei geladen",
-      description: `${parsedRows.length} Zeile(n), ${parsedHeaders.length} Spalte(n) aus "${loadedFileName}".`,
+      description: `${projectedRows.length} Zeile(n) aus "${loadedFileName}".`,
     });
   };
 
@@ -184,8 +197,30 @@ export default function Discounts() {
 
   const handleApplyAll = () => {
     if (!hasData) return;
-    setExtraValues(prev => prev.map(() => ({
-      sonderpreis: globalSonderpreis,
+
+    const pct = parseFloat(globalSonderpreis.replace(",", "."));
+    const hasPct = globalSonderpreis.trim() !== "" && !isNaN(pct) && pct > 0 && pct <= 100;
+
+    let sonderpreisPerRow: string[] | null = null;
+    if (globalSonderpreis.trim() !== "") {
+      if (!hasPct) {
+        toast({
+          title: "Ungültiger Rabatt",
+          description: "Bitte einen Prozentsatz zwischen 0 und 100 eingeben (z.B. 5).",
+          variant: "destructive",
+        });
+        return;
+      }
+      // Brutto-VK always sits at a fixed column position in the export now
+      // (it's one of the 5 projected source columns), so its Excel column
+      // letter is known ahead of time rather than searched for.
+      const multiplier = (1 - pct / 100).toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+      const colLetter = excelColumnLetter(VK_OUTPUT_INDEX);
+      sonderpreisPerRow = rows.map((_, i) => `=${colLetter}${i + 2}*${multiplier}`);
+    }
+
+    setExtraValues(prev => prev.map((_, i) => ({
+      sonderpreis: sonderpreisPerRow ? sonderpreisPerRow[i] : "",
       startdatum: globalStart,
       enddatum: globalEnd,
       lagerbestand: globalLager,
@@ -198,12 +233,13 @@ export default function Discounts() {
 
   const handleDownload = () => {
     if (!hasData) return;
-    const allHeaders = [...headers, ...NEW_COLUMNS];
+    const allHeaders = [...SOURCE_COLUMNS.map(c => c.label), ...NEW_COLUMNS];
     const lines = [
       allHeaders.map(escapeCsvCell).join(";"),
       ...rows.map((row, i) => {
         const extra = extraValues[i] ?? emptyExtra();
-        const full = [...row, extra.sonderpreis, extra.startdatum, extra.enddatum, extra.lagerbestand];
+        // "Erstelldatum" is always empty, per spec.
+        const full = [...row, extra.sonderpreis, extra.startdatum, extra.enddatum, extra.lagerbestand, ""];
         return full.map(escapeCsvCell).join(";");
       }),
     ];
@@ -255,9 +291,7 @@ export default function Discounts() {
             <span className="text-sm text-muted-foreground flex items-center gap-2 min-w-0">
               <FileSpreadsheet className="h-4 w-4 shrink-0" />
               <span className="font-medium text-foreground truncate max-w-[300px]" title={fileName}>{fileName}</span>
-              <span className="shrink-0">
-                {rows.length.toLocaleString("de-DE")} Zeilen, {headers.length} Spalten
-              </span>
+              <span className="shrink-0">{rows.length.toLocaleString("de-DE")} Zeilen</span>
             </span>
           ) : (
             <span className="text-sm text-muted-foreground">Noch keine Datei geladen.</span>
@@ -294,14 +328,16 @@ export default function Discounts() {
             <div className="bg-card border border-border rounded-lg p-4 mb-4">
               <div className="flex flex-wrap items-end gap-4">
                 <div className="space-y-1">
-                  <Label htmlFor="sonderpreis" className="text-xs">Sonderpreis Endkunden brutto</Label>
+                  <Label htmlFor="sonderpreis" className="text-xs">Sonderpreis-Rabatt %</Label>
                   <Input
                     id="sonderpreis"
                     value={globalSonderpreis}
                     onChange={(e) => setGlobalSonderpreis(e.target.value)}
-                    placeholder="z.B. 19,99"
-                    className="w-40"
+                    placeholder="z.B. 5"
+                    title="Wird als Excel-Formel in die Spalte 'Sonderpreis Endkunden brutto' eingetragen: Brutto-VK * (1 - Rabatt%), z.B. 5% → VK*0,95."
+                    className="w-32"
                   />
+                  <p className="text-[11px] text-muted-foreground">= Brutto-VK × (1 − %)</p>
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="startdatum" className="text-xs">Startdatum</Label>
@@ -352,9 +388,9 @@ export default function Discounts() {
                   <thead className="sticky top-0 z-10">
                     <tr className="bg-[hsl(0,0%,85%)]">
                       <th className="border border-[hsl(0,0%,75%)] px-2 py-2 text-left text-xs font-semibold text-muted-foreground w-10">#</th>
-                      {headers.map((h, i) => (
-                        <th key={`orig-${i}`} className="border border-[hsl(0,0%,75%)] px-2 py-2 text-left text-xs font-semibold whitespace-nowrap">
-                          {h}
+                      {SOURCE_COLUMNS.map((c) => (
+                        <th key={c.label} className="border border-[hsl(0,0%,75%)] px-2 py-2 text-left text-xs font-semibold whitespace-nowrap">
+                          {c.label}
                         </th>
                       ))}
                       {NEW_COLUMNS.map((h) => (
@@ -379,6 +415,7 @@ export default function Discounts() {
                           <td className="border border-[hsl(0,0%,88%)] px-2 py-1 whitespace-nowrap bg-blue-50/50 dark:bg-blue-950/10">{extra.startdatum}</td>
                           <td className="border border-[hsl(0,0%,88%)] px-2 py-1 whitespace-nowrap bg-blue-50/50 dark:bg-blue-950/10">{extra.enddatum}</td>
                           <td className="border border-[hsl(0,0%,88%)] px-2 py-1 whitespace-nowrap bg-blue-50/50 dark:bg-blue-950/10">{extra.lagerbestand}</td>
+                          <td className="border border-[hsl(0,0%,88%)] px-2 py-1 whitespace-nowrap bg-blue-50/50 dark:bg-blue-950/10" />
                         </tr>
                       );
                     })}

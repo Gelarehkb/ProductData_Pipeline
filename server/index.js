@@ -416,6 +416,71 @@ Return only the direct URL of the most authoritative product page (prefer the br
   }
 });
 
+// ── extract-product-types (JTL Import product-name dictionary) ────────────────
+app.post('/api/extract-product-types', async (req, res) => {
+  try {
+    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+    if (!OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is not configured');
+
+    const { names } = req.body;
+    if (!names || !Array.isArray(names) || names.length === 0) throw new Error('names array is required');
+
+    const prompt = `You extract the product-type name from German/English children's-store article names.
+
+Rules:
+- Return ONLY the word(s) that describe WHAT THE OBJECT IS (e.g. "Schlafsack", "Wollmütze", "Strampler", "Sleeping Bag").
+- Ignore color, size, material, brand, and variant/model details.
+- The product type is usually the first or second word of the name.
+- Use Title Case.
+- You MUST return exactly ${names.length} results, one per input item, in the same order.
+
+Items (${names.length} total):
+${names.map((n, i) => `${i + 1}. ${n}`).join('\n')}
+
+Respond ONLY with JSON: {"results":["...", ...]}
+No markdown. Exactly ${names.length} elements.`;
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-4.1-nano',
+        messages: [{ role: 'user', content: prompt }],
+        response_format: { type: 'json_object' },
+        temperature: 0.1,
+      }),
+    });
+
+    if (!response.ok) {
+      const status = response.status;
+      if (status === 429) return res.status(429).json({ error: 'Rate limit exceeded' });
+      const txt = await response.text();
+      throw new Error(`OpenAI error [${status}]: ${txt}`);
+    }
+
+    const data = await response.json();
+    let content = data.choices?.[0]?.message?.content || '';
+    content = content.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
+
+    let results;
+    try {
+      const parsed = JSON.parse(content);
+      results = Array.isArray(parsed) ? parsed : (parsed.results || parsed.names || Object.values(parsed)[0]);
+      if (!Array.isArray(results)) throw new Error('Not an array');
+    } catch {
+      throw new Error('AI returned invalid JSON');
+    }
+
+    while (results.length < names.length) results.push(names[results.length]);
+    results = results.slice(0, names.length);
+
+    res.json({ results });
+  } catch (error) {
+    console.error('extract-product-types error:', error);
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+});
+
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
 app.use('/api/generate-online-texts-simple', generateSimple);

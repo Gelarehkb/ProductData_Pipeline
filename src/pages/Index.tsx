@@ -10,13 +10,14 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Download, Trash2, ClipboardPaste, Undo2, Sparkles, Loader2, Globe, Plus, Upload, FolderTree, Eye, RotateCcw, Percent } from "lucide-react";
+import { Download, Trash2, ClipboardPaste, Undo2, Sparkles, Loader2, Globe, Plus, Upload, FolderTree, Eye, RotateCcw, Percent, Database } from "lucide-react";
 import { MerkmaleMultiSelect } from "@/components/MerkmaleMultiSelect";
 import { useToast } from "@/hooks/use-toast";
 import { FindReplaceDialog } from "@/components/FindReplaceDialog";
 import { ImportDialog, type ImportTargetField } from "@/components/ImportDialog";
 import { TextPreviewModal, type TextPreviewRow } from "@/components/TextPreviewModal";
 import { CategoryPreviewModal, type CategoryPreviewRow } from "@/components/CategoryPreviewModal";
+import { DictionaryModal } from "@/components/DictionaryModal";
 async function apiFetch(fn: string, body: object): Promise<{ data: unknown; error: Error | null }> {
   try {
     const res = await fetch(`/api/${fn}`, {
@@ -37,6 +38,49 @@ interface CellPosition {
   row: number;
   col: number;
 }
+
+// ── CSV utilities for the "JTL Import" dictionary feature (Artikelname/EAN/HAN only) ──
+function jtlImportParseCsv(text: string, delimiter: string): string[][] {
+  const out: string[][] = [];
+  let field = "";
+  let row: string[] = [];
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; continue; }
+        inQuotes = false; continue;
+      }
+      field += ch; continue;
+    }
+    if (ch === '"') { inQuotes = true; continue; }
+    if (ch === delimiter) { row.push(field); field = ""; continue; }
+    if (ch === "\r") continue;
+    if (ch === "\n") { row.push(field); out.push(row); row = []; field = ""; continue; }
+    field += ch;
+  }
+  if (field.length > 0 || row.length > 0) { row.push(field); out.push(row); }
+  return out.filter(r => r.some(c => c.trim() !== ""));
+}
+
+function jtlImportDetectDelimiter(text: string): string {
+  const sample = text.slice(0, 64 * 1024);
+  let inQ = false;
+  const counts: Record<string, number> = { ";": 0, ",": 0, "\t": 0 };
+  for (let i = 0; i < sample.length; i++) {
+    const c = sample[i];
+    if (c === '"') { if (inQ && sample[i + 1] === '"') { i++; continue; } inQ = !inQ; continue; }
+    if (!inQ && counts[c] !== undefined) counts[c]++;
+  }
+  return Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0] || ";";
+}
+
+function jtlImportStripBom(s: string): string {
+  return s.charCodeAt(0) === 0xfeff ? s.slice(1) : s;
+}
+
+const JTL_IMPORT_IGNORED_HAN = new Set(["OP", "DC", "NA"]);
 
 interface ClothRow {
   id: string;
@@ -445,7 +489,113 @@ const Index = () => {
   const [verfuegbarkeit, setVerfuegbarkeit] = useState("3 - 5 Werktage");
   // Separate from the "Rabatt %" summary field below the grid: this one actually
   // reduces EK, VK, and Liefer. EK in the final GESAMT export.
-  const [ekVkDiscount, setEkVkDiscount] = useState("");
+  const [ekDiscount, setEkDiscount] = useState("");
+
+  // ── JTL Import: EAN/HAN/product-type dictionaries for live duplicate checking ──
+  const jtlImportFileInputRef = useRef<HTMLInputElement>(null);
+  const [jtlImportFileName, setJtlImportFileName] = useState("");
+  const [jtlEanDict, setJtlEanDict] = useState<Set<string>>(new Set());
+  const [jtlHanDict, setJtlHanDict] = useState<Set<string>>(new Set());
+  const [jtlProductTypeDict, setJtlProductTypeDict] = useState<string[]>([]);
+  const [isExtractingProductTypes, setIsExtractingProductTypes] = useState(false);
+  const [dictionaryOpen, setDictionaryOpen] = useState(false);
+
+  const handleJtlImportUpload = useCallback(async (file: File) => {
+    try {
+      const buf = await file.arrayBuffer();
+      // Try UTF-8 first; only fall back to windows-1252 if decoding produced a
+      // replacement char — decoding cp1252 first would silently mangle genuine
+      // UTF-8 umlauts instead.
+      let text = new TextDecoder("utf-8").decode(buf);
+      if (text.includes("�")) text = new TextDecoder("windows-1252").decode(buf);
+      text = jtlImportStripBom(text);
+      const delimiter = jtlImportDetectDelimiter(text);
+      const allRows = jtlImportParseCsv(text, delimiter);
+      if (allRows.length < 2) {
+        toast({ title: lang === "DE" ? "Keine Daten" : "No data", description: lang === "DE" ? "Die Datei enthält keine verwertbaren Zeilen." : "The file contains no usable rows.", variant: "destructive" });
+        return;
+      }
+
+      const headers = allRows[0].map(h => h.trim().toLowerCase());
+      const colIdx = (names: string[]): number => {
+        for (const name of names) {
+          const idx = headers.findIndex(h => h === name || h.includes(name));
+          if (idx !== -1) return idx;
+        }
+        return -1;
+      };
+      const iName = colIdx(["artikelname"]);
+      const iEan = colIdx(["ean"]);
+      const iHan = colIdx(["han"]);
+
+      const eanSet = new Set<string>();
+      const hanSet = new Set<string>();
+      const nameSet = new Set<string>();
+      for (let r = 1; r < allRows.length; r++) {
+        const row = allRows[r];
+        if (row.every(c => c.trim() === "")) continue;
+        const ean = iEan >= 0 ? (row[iEan] ?? "").trim() : "";
+        const han = iHan >= 0 ? (row[iHan] ?? "").trim() : "";
+        const name = iName >= 0 ? (row[iName] ?? "").trim() : "";
+        if (ean) eanSet.add(ean);
+        if (han && !JTL_IMPORT_IGNORED_HAN.has(han.toUpperCase())) hanSet.add(han);
+        if (name) nameSet.add(name);
+      }
+
+      setJtlEanDict(eanSet);
+      setJtlHanDict(hanSet);
+      setJtlImportFileName(file.name);
+      setJtlProductTypeDict([]);
+
+      toast({
+        title: lang === "DE" ? "JTL Import geladen" : "JTL import loaded",
+        description: lang === "DE"
+          ? `${eanSet.size} EAN, ${hanSet.size} HAN, ${nameSet.size} Artikelnamen erkannt. Extrahiere Produkttypen…`
+          : `${eanSet.size} EAN, ${hanSet.size} HAN, ${nameSet.size} article names detected. Extracting product types…`,
+      });
+
+      // Extract product-type names via the lightweight AI model, chunked to keep
+      // each request small and predictable.
+      const uniqueNames = [...nameSet];
+      if (uniqueNames.length === 0) return;
+
+      setIsExtractingProductTypes(true);
+      const CHUNK_SIZE = 40;
+      const productTypes = new Set<string>();
+      try {
+        for (let i = 0; i < uniqueNames.length; i += CHUNK_SIZE) {
+          const chunk = uniqueNames.slice(i, i + CHUNK_SIZE);
+          const res = await fetch("/api/extract-product-types", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ names: chunk }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+          (data.results as string[]).forEach(pt => {
+            const trimmed = (pt || "").trim();
+            if (trimmed) productTypes.add(trimmed);
+          });
+        }
+        setJtlProductTypeDict([...productTypes].sort((a, b) => a.localeCompare(b, "de")));
+        toast({
+          title: lang === "DE" ? "Produkttyp-Wörterbuch erstellt" : "Product-type dictionary built",
+          description: lang === "DE" ? `${productTypes.size} eindeutige Produkttypen.` : `${productTypes.size} unique product types.`,
+        });
+      } catch (err) {
+        toast({
+          title: lang === "DE" ? "Fehler bei Produkttyp-Extraktion" : "Product-type extraction failed",
+          description: String(err),
+          variant: "destructive",
+        });
+      } finally {
+        setIsExtractingProductTypes(false);
+      }
+    } catch (err) {
+      toast({ title: lang === "DE" ? "Fehler beim Importieren" : "Import failed", description: String(err), variant: "destructive" });
+    }
+  }, [toast, lang]);
+
   const verfuegbarkeitOptions = [
     "2 - 5 Werktage",
     "3 - 7 Werktage",
@@ -620,12 +770,27 @@ const Index = () => {
     if (merkmaleHasData) setMerkmale(true);
   }, [merkmaleHasData]);
 
+  // Row ids whose EAN/HAN duplicates a value already in the imported JTL dictionaries —
+  // recomputed whenever rows or the dictionaries change, so typing/pasting is checked live.
+  const eanDuplicateRowIds = useMemo(() => {
+    if (jtlEanDict.size === 0) return new Set<string>();
+    const s = new Set<string>();
+    rows.forEach(r => { const v = r.EAN.trim(); if (v && jtlEanDict.has(v)) s.add(r.id); });
+    return s;
+  }, [rows, jtlEanDict]);
+  const hanDuplicateRowIds = useMemo(() => {
+    if (jtlHanDict.size === 0) return new Set<string>();
+    const s = new Set<string>();
+    rows.forEach(r => { const v = r.HAN.trim(); if (v && jtlHanDict.has(v)) s.add(r.id); });
+    return s;
+  }, [rows, jtlHanDict]);
+
   const handleClearData = useCallback(() => {
     const count = Math.max(1, parseInt(rowCount, 10) || 10);
     setRows(Array.from({ length: count }, () => createEmptyRow()));
     setHistory([]);
     setDiscount("");
-    setEkVkDiscount("");
+    setEkDiscount("");
     setSelection([]);
     setSelectionStart(null);
     setHanFixed({});
@@ -1153,6 +1318,20 @@ const Index = () => {
       }
       return updated;
     }));
+
+    // Live JTL-dictionary duplicate check — fires as soon as a typed/pasted EAN or
+    // HAN value exactly matches one already in the imported reference file.
+    if (field === "EAN" || field === "HAN") {
+      const dict = field === "EAN" ? jtlEanDict : jtlHanDict;
+      const v = finalValue.trim();
+      if (v && dict.has(v)) {
+        toast({
+          title: lang === "DE" ? "Duplikat gefunden" : "Duplicate found",
+          description: lang === "DE" ? `Dieser ${field} existiert bereits.` : `This ${field} already exists.`,
+          variant: "destructive",
+        });
+      }
+    }
   };
 
   const handleUndo = () => {
@@ -1274,7 +1453,7 @@ const Index = () => {
   // Paste into selected area
   const handlePasteSelection = useCallback(async () => {
     if (selection.length === 0) return;
-    
+
     try {
       const text = await navigator.clipboard.readText();
       const minRow = Math.min(...selection.map(s => s.row));
@@ -1333,6 +1512,19 @@ const Index = () => {
 
       if (matrix.length === 0) return;
 
+      // Count JTL-dictionary duplicates among the pasted EAN/HAN values before they land in state.
+      let duplicateCount = 0;
+      matrix.forEach(cells => {
+        cells.forEach((val, j) => {
+          const targetCol = minCol + j;
+          if (targetCol >= columns.length) return;
+          const tf = columns[targetCol].key as keyof ClothRow;
+          const v = val.trim();
+          if (tf === "EAN" && v && jtlEanDict.has(v)) duplicateCount++;
+          if (tf === "HAN" && v && jtlHanDict.has(v)) duplicateCount++;
+        });
+      });
+
       setHistory(prev => [...prev.slice(-49), rows]);
       lastEditedCellRef.current = null;
       setRows(prev => {
@@ -1355,11 +1547,20 @@ const Index = () => {
         setRowCount(String(newRows.length));
         return newRows;
       });
-      
+
       toast({
         title: "Eingefügt",
         description: `Daten wurden eingefügt.`,
       });
+      if (duplicateCount > 0) {
+        toast({
+          title: lang === "DE" ? "Duplikate gefunden" : "Duplicates found",
+          description: lang === "DE"
+            ? `${duplicateCount} eingefügte(r) EAN/HAN existiert bereits.`
+            : `${duplicateCount} pasted EAN/HAN value(s) already exist.`,
+          variant: "destructive",
+        });
+      }
     } catch (error) {
       toast({
         title: "Fehler",
@@ -1367,7 +1568,7 @@ const Index = () => {
         variant: "destructive",
       });
     }
-  }, [selection, rows, columns, toast]);
+  }, [selection, rows, columns, toast, jtlEanDict, jtlHanDict, lang]);
 
   // Delete selected cells
   const handleDeleteSelection = useCallback(() => {
@@ -1635,6 +1836,19 @@ const Index = () => {
     // Single cell with a single value → let browser handle natively (already caught above for no-newline case).
     if (matrix.length === 1 && maxCols === 1) return;
 
+    // Count JTL-dictionary duplicates among the pasted EAN/HAN values before they land in state.
+    let duplicateCount = 0;
+    matrix.forEach(cells => {
+      cells.forEach((val, j) => {
+        const targetCol = colIndex + j;
+        if (targetCol >= columns.length) return;
+        const tf = columns[targetCol].key as keyof ClothRow;
+        const v = val.trim();
+        if (tf === "EAN" && v && jtlEanDict.has(v)) duplicateCount++;
+        if (tf === "HAN" && v && jtlHanDict.has(v)) duplicateCount++;
+      });
+    });
+
     e.preventDefault();
     setHistory(prev => [...prev.slice(-49), rows]);
     lastEditedCellRef.current = null;
@@ -1659,6 +1873,15 @@ const Index = () => {
       return newRows;
     });
     toast({ title: "Daten eingefügt", description: `${matrix.length} Zeile(n) × ${maxCols} Spalte(n) verteilt.` });
+    if (duplicateCount > 0) {
+      toast({
+        title: lang === "DE" ? "Duplikate gefunden" : "Duplicates found",
+        description: lang === "DE"
+          ? `${duplicateCount} eingefügte(r) EAN/HAN existiert bereits.`
+          : `${duplicateCount} pasted EAN/HAN value(s) already exist.`,
+        variant: "destructive",
+      });
+    }
   };
 
 
@@ -2231,15 +2454,15 @@ const Index = () => {
     const Lieferstatus = verfuegbarkeit || "3 - 5 Werktage";
     const LieferzeitVal = parseInt(lieferzeit) || 14;
 
-    // EK/VK Rabatt % reduces EK, VK, and Liefer. EK in the exported file (grid
+    // EK Rabatt % reduces EK and Liefer. EK (not VK) in the exported file (grid
     // values themselves stay untouched). This is separate from the Rabatt %
     // in the bottom toolbar, which only affects the displayed order total.
-    const ekVkDiscountPct = parseFloat(ekVkDiscount.replace(",", "."));
+    const ekDiscountPct = parseFloat(ekDiscount.replace(",", "."));
     const applyDiscount = (raw: string): string => {
-      if (isNaN(ekVkDiscountPct) || ekVkDiscountPct <= 0 || ekVkDiscountPct > 100) return raw;
+      if (isNaN(ekDiscountPct) || ekDiscountPct <= 0 || ekDiscountPct > 100) return raw;
       const n = parseFloat((raw || "").replace(",", "."));
       if (isNaN(n)) return raw;
-      return (n * (1 - ekVkDiscountPct / 100)).toFixed(2).replace(".", ",");
+      return (n * (1 - ekDiscountPct / 100)).toFixed(2).replace(".", ",");
     };
 
     // Group by combined name + color
@@ -2289,7 +2512,7 @@ const Index = () => {
         const minEK = eks.length ? eks.reduce((a, b) => a.num <= b.num ? a : b).raw : "";
         const minVK = vks.length ? vks.reduce((a, b) => a.num <= b.num ? a : b).raw : "";
         outputRows.push(buildRow(
-          vaterArtikelnummer, "", name, "", color, "", "Vater", applyDiscount(minEK), applyDiscount(minVK), hersteller,
+          vaterArtikelnummer, "", name, "", color, "", "Vater", applyDiscount(minEK), minVK, hersteller,
           AufAB, AufAuf, AufSe, Lieferstatus, LieferzeitVal, "", lieferant, firstRowWarengruppe, translated,
           parentGroesse, parentArt, parentFarbe, "",
           tx.produkttext, tx.Title_Tag, tx.html_de, tx.meta_description, tx.suchbegriffe
@@ -2313,7 +2536,7 @@ const Index = () => {
           eanVal,
           hanVal,
           applyDiscount(r.EK),
-          applyDiscount(r.VK),
+          r.VK,
           hersteller,
           AufAB,
           AufAuf,
@@ -2408,6 +2631,44 @@ const Index = () => {
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
+            <input
+              ref={jtlImportFileInputRef}
+              type="file"
+              accept=".csv,.txt"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleJtlImportUpload(f);
+                e.target.value = "";
+              }}
+            />
+            <Button
+              onClick={() => jtlImportFileInputRef.current?.click()}
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              disabled={isExtractingProductTypes}
+              title={lang === "DE"
+                ? "CSV mit Artikelname, EAN, HAN laden — baut EAN-, HAN- und Produkttyp-Wörterbücher für die Duplikatsprüfung."
+                : "Load a CSV with Artikelname, EAN, HAN — builds EAN, HAN, and product-type dictionaries for duplicate checking."}
+            >
+              {isExtractingProductTypes ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+              {lang === "DE" ? "JTL Import" : "JTL Import"}
+            </Button>
+            {jtlImportFileName && (
+              <span className="text-xs text-muted-foreground truncate max-w-[160px]" title={jtlImportFileName}>
+                {jtlImportFileName}
+              </span>
+            )}
+            <Button
+              onClick={() => setDictionaryOpen(true)}
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+            >
+              <Database className="h-4 w-4" />
+              {lang === "DE" ? "Dictionary" : "Dictionary"}
+            </Button>
           </div>
           <div className="flex items-center gap-2">
             <a href="/text-generator">
@@ -2500,22 +2761,22 @@ const Index = () => {
             </div>
 
             <div className="space-y-1">
-              <Label htmlFor="ekVkDiscount" className="text-xs whitespace-nowrap">
-                {lang === "DE" ? "EK/VK Rabatt %" : "EK/VK discount %"}
+              <Label htmlFor="ekDiscount" className="text-xs whitespace-nowrap">
+                {lang === "DE" ? "EK Rabatt %" : "EK discount %"}
               </Label>
               <Input
-                id="ekVkDiscount"
+                id="ekDiscount"
                 type="text"
                 inputMode="decimal"
-                value={ekVkDiscount}
+                value={ekDiscount}
                 onChange={(e) => {
                   const v = e.target.value;
-                  if (v === "" || /^\d{0,3}([.,]\d{0,2})?$/.test(v)) setEkVkDiscount(v);
+                  if (v === "" || /^\d{0,3}([.,]\d{0,2})?$/.test(v)) setEkDiscount(v);
                 }}
                 placeholder="0"
                 title={lang === "DE"
-                  ? "Reduziert EK, VK und Liefer. EK um diesen Prozentsatz im finalen GESAMT-Export (die Werte im Raster bleiben unverändert)."
-                  : "Reduces EK, VK, and Liefer. EK by this percentage in the final GESAMT export (grid values stay unchanged)."}
+                  ? "Reduziert EK und Liefer. EK um diesen Prozentsatz im finalen GESAMT-Export (VK und die Werte im Raster bleiben unverändert)."
+                  : "Reduces EK and Liefer. EK by this percentage in the final GESAMT export (VK and grid values stay unchanged)."}
                 className="w-20"
               />
             </div>
@@ -2819,7 +3080,16 @@ const Index = () => {
                               data-row={rowIndex}
                               data-col={colIndex}
                               readOnly={col.key === "HAN" && combineHAN && !hanFixed[row.id]}
-                              className="w-full px-2 py-1.5 bg-transparent border-none outline-none focus:ring-2 focus:ring-primary/50 text-sm pr-6"
+                              title={
+                                (col.key === "EAN" && eanDuplicateRowIds.has(row.id)) ? (lang === "DE" ? "Dieser EAN existiert bereits." : "This EAN already exists.")
+                                : (col.key === "HAN" && hanDuplicateRowIds.has(row.id)) ? (lang === "DE" ? "Dieser HAN existiert bereits." : "This HAN already exists.")
+                                : undefined
+                              }
+                              className={`w-full px-2 py-1.5 bg-transparent border-none outline-none focus:ring-2 focus:ring-primary/50 text-sm pr-6 ${
+                                ((col.key === "EAN" && eanDuplicateRowIds.has(row.id)) || (col.key === "HAN" && hanDuplicateRowIds.has(row.id)))
+                                  ? "bg-destructive/10 text-destructive ring-1 ring-inset ring-destructive/50"
+                                  : ""
+                              }`}
                             />
                           )}
                           {!col.isDropdown && row[col.key] && rowIndex < rows.length - 1 && (
@@ -2996,11 +3266,11 @@ const Index = () => {
                   {t("csvExport", lang)}
                 </Button>
               </TooltipTrigger>
-              {parseFloat(ekVkDiscount.replace(",", ".")) > 0 && (
+              {parseFloat(ekDiscount.replace(",", ".")) > 0 && (
                 <TooltipContent side="top">
                   {lang === "DE"
-                    ? `EK und VK werden im Export um ${ekVkDiscount}% reduziert.`
-                    : `EK and VK will be reduced by ${ekVkDiscount}% in the export.`}
+                    ? `EK und Liefer. EK werden im Export um ${ekDiscount}% reduziert.`
+                    : `EK and Liefer. EK will be reduced by ${ekDiscount}% in the export.`}
                 </TooltipContent>
               )}
             </Tooltip>
@@ -3052,6 +3322,14 @@ const Index = () => {
         initialRows={categoryPreviewRows}
         lang={lang}
         onConfirm={handleCategoryConfirm}
+      />
+      <DictionaryModal
+        open={dictionaryOpen}
+        onOpenChange={setDictionaryOpen}
+        productTypes={jtlProductTypeDict}
+        eanCount={jtlEanDict.size}
+        hanCount={jtlHanDict.size}
+        lang={lang}
       />
     </div>
   );
