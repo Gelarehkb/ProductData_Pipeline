@@ -2199,6 +2199,15 @@ const Index = () => {
     const Lieferstatus = verfuegbarkeit || "3 - 5 Werktage";
     const LieferzeitVal = parseInt(lieferzeit) || 14;
 
+    // Rabatt % also reduces EK/VK in the exported file (grid values themselves stay untouched).
+    const discountPct = parseFloat(discount.replace(",", "."));
+    const applyDiscount = (raw: string): string => {
+      if (isNaN(discountPct) || discountPct <= 0 || discountPct > 100) return raw;
+      const n = parseFloat((raw || "").replace(",", "."));
+      if (isNaN(n)) return raw;
+      return (n * (1 - discountPct / 100)).toFixed(2).replace(".", ",");
+    };
+
     // Group by combined name + color
     const groups: Record<string, ClothRow[]> = {};
     rows.forEach(row => {
@@ -2246,7 +2255,7 @@ const Index = () => {
         const minEK = eks.length ? eks.reduce((a, b) => a.num <= b.num ? a : b).raw : "";
         const minVK = vks.length ? vks.reduce((a, b) => a.num <= b.num ? a : b).raw : "";
         outputRows.push(buildRow(
-          vaterArtikelnummer, "", name, "", color, "", "Vater", minEK, minVK, hersteller,
+          vaterArtikelnummer, "", name, "", color, "", "Vater", applyDiscount(minEK), applyDiscount(minVK), hersteller,
           AufAB, AufAuf, AufSe, Lieferstatus, LieferzeitVal, "", lieferant, firstRowWarengruppe, translated,
           parentGroesse, parentArt, parentFarbe, "",
           tx.produkttext, tx.Title_Tag, tx.html_de, tx.meta_description, tx.suchbegriffe
@@ -2269,8 +2278,8 @@ const Index = () => {
           color,
           eanVal,
           hanVal,
-          r.EK,
-          r.VK,
+          applyDiscount(r.EK),
+          applyDiscount(r.VK),
           hersteller,
           AufAB,
           AufAuf,
@@ -2837,6 +2846,9 @@ const Index = () => {
               value={discount}
               onChange={handleDiscountChange}
               placeholder="0"
+              title={lang === "DE"
+                ? "Reduziert EK und VK um diesen Prozentsatz im CSV-Export (die Werte im Raster bleiben unverändert)."
+                : "Reduces EK and VK by this percentage in the CSV export (grid values stay unchanged)."}
               className="h-5 w-12 px-1 text-xs text-center"
             />
             {parseFloat(discount.replace(",", ".")) > 0 && (
@@ -2915,10 +2927,23 @@ const Index = () => {
           </div>
 
           {/* ── Primary export ── */}
-          <Button onClick={() => processAndDownload()} size="sm" className="gap-1.5" disabled={isGeneratingTexts || isMapping}>
-            <Download className="h-3.5 w-3.5" />
-            {t("csvExport", lang)}
-          </Button>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button onClick={() => processAndDownload()} size="sm" className="gap-1.5" disabled={isGeneratingTexts || isMapping}>
+                  <Download className="h-3.5 w-3.5" />
+                  {t("csvExport", lang)}
+                </Button>
+              </TooltipTrigger>
+              {parseFloat(discount.replace(",", ".")) > 0 && (
+                <TooltipContent side="top">
+                  {lang === "DE"
+                    ? `EK und VK werden im Export um ${discount}% reduziert.`
+                    : `EK and VK will be reduced by ${discount}% in the export.`}
+                </TooltipContent>
+              )}
+            </Tooltip>
+          </TooltipProvider>
 
           {/* ── AI tools ── */}
           <Button variant="outline" size="sm" className="gap-1.5" onClick={handleAIClassify} disabled={isClassifying || isRetrying}>
