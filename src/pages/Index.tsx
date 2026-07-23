@@ -1462,14 +1462,18 @@ const Index = () => {
 
       const hasTab       = text.includes("\t");
       const hasSemicolon = text.includes(";");
-      const hasNewline   = /\r?\n/.test(text.trim());
 
-      // Description always gets the full text as one value.
-      if (targetField === "Description" && !hasTab && !hasSemicolon) {
+      // Description behaves like any other column: a quoted RFC4180 block (e.g.
+      // copied from a single spreadsheet cell with embedded line breaks) stays
+      // one value; plain newline-separated text — like several one-line
+      // descriptions pasted at once — distributes one per row below, same as
+      // every other column.
+      if (targetField === "Description" && !hasTab && !hasSemicolon && text.trimStart().startsWith('"') && text.trimEnd().endsWith('"')) {
         setHistory(prev => [...prev.slice(-49), rows]);
         setRows(prev => {
           const newRows = [...prev];
-          newRows[minRow] = { ...newRows[minRow], [targetField]: text.trimEnd() };
+          const unquoted = text.trim().slice(1, -1).replace(/""/g, '"');
+          newRows[minRow] = { ...newRows[minRow], [targetField]: unquoted };
           return newRows;
         });
         toast({ title: "Eingefügt", description: "Daten wurden eingefügt." });
@@ -1777,10 +1781,15 @@ const Index = () => {
     const hasSemicolon = pastedText.includes(";");
     const hasNewline   = /\r?\n/.test(pastedText.trim());
 
-    // Description is a free-text blob — always one cell, newlines included.
-    if (field === "Description" && !hasTab && !hasSemicolon) {
+    // Description behaves like any other column: a quoted RFC4180 block (e.g.
+    // copied from a single spreadsheet cell with embedded line breaks) stays one
+    // cell; plain newline-separated text — several one-line descriptions pasted
+    // at once — falls through to the matrix parser below and distributes one
+    // per row, same as every other column.
+    if (field === "Description" && !hasTab && !hasSemicolon && pastedText.trimStart().startsWith('"') && pastedText.trimEnd().endsWith('"')) {
       e.preventDefault();
-      handleCellChange(rows[rowIndex].id, field, pastedText.trimEnd());
+      const unquoted = pastedText.trim().slice(1, -1).replace(/""/g, '"');
+      handleCellChange(rows[rowIndex].id, field, unquoted);
       return;
     }
 
