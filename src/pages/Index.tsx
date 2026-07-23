@@ -713,9 +713,13 @@ const Index = () => {
   const merkmaleGroesseOptions = [
     "50 cm (0M)", "62 cm (0-3M)", "68 cm (3-6M)", "74 cm (6-9M)", "80 cm (9-12M)",
     "86 cm (12-18M)", "92 cm (2J)", "98 cm (3J)", "104 cm (4J)", "110 cm (5J)",
-    "116 cm (6J)", "120 cm (6J)", "128 cm (6J)",
-    // Accessories sizing (age equivalent) — applies whenever Size is one of these codes,
-    // independent of Warengruppe.
+    "116 cm (6J)", "120 cm (6J)", "128 cm (6J)"
+  ];
+  // Accessories sizing (age equivalent) — auto-classified whenever Size is one of
+  // these codes (independent of Warengruppe), but not offered as a manually
+  // pickable Größe option, so it doesn't clutter the dropdown.
+  const merkmaleGroesseMatchOptions = [
+    ...merkmaleGroesseOptions,
     "T0 (0-1M)", "T1 (1-3M)", "T2 (6-12M)", "T3 (12-24M)", "T4 (36-48M)",
     "S1 (0-3M)", "S2 (3-6M)", "S3 (6-12M)", "S4 (12-24M)", "S5 (36-48M)"
   ];
@@ -887,7 +891,7 @@ const Index = () => {
               WarenGruppe: c.warengruppe || row.WarenGruppe,
               MerkmaleFarbe: c.farbe || mapColorToMerkmaleFarbe(row.color, merkmaleFarbeOptions) || row.MerkmaleFarbe || "",
               MerkmaleArt: c.art || row.MerkmaleArt || "",
-              MerkmaleGroesse: c.groesse || mapSizeToMerkmaleGroesse(row.Size, merkmaleGroesseOptions) || row.MerkmaleGroesse || "",
+              MerkmaleGroesse: c.groesse || mapSizeToMerkmaleGroesse(row.Size, merkmaleGroesseMatchOptions) || row.MerkmaleGroesse || "",
             };
             classIdx++;
           }
@@ -937,7 +941,7 @@ const Index = () => {
               WarenGruppe: c.warengruppe || row.WarenGruppe,
               MerkmaleFarbe: c.farbe || mapColorToMerkmaleFarbe(row.color, merkmaleFarbeOptions) || row.MerkmaleFarbe || "",
               MerkmaleArt: c.art || row.MerkmaleArt || "",
-              MerkmaleGroesse: c.groesse || mapSizeToMerkmaleGroesse(row.Size, merkmaleGroesseOptions) || row.MerkmaleGroesse || "",
+              MerkmaleGroesse: c.groesse || mapSizeToMerkmaleGroesse(row.Size, merkmaleGroesseMatchOptions) || row.MerkmaleGroesse || "",
             };
             classIdx++;
           }
@@ -1310,7 +1314,7 @@ const Index = () => {
       const updated = { ...row, [field]: finalValue };
       // Auto-map Size to MerkmaleGroesse
       if (field === "Size") {
-        updated.MerkmaleGroesse = mapSizeToMerkmaleGroesse(finalValue, merkmaleGroesseOptions);
+        updated.MerkmaleGroesse = mapSizeToMerkmaleGroesse(finalValue, merkmaleGroesseMatchOptions);
       }
       // Auto-map color to MerkmaleFarbe
       if (field === "color") {
