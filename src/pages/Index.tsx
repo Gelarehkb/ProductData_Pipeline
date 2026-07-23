@@ -688,8 +688,8 @@ const Index = () => {
         Size: item.Size ?? "",
         EAN: item.EAN ?? "",
         HAN: item.HAN ?? "",
-        EK: item.EK ?? "",
-        VK: item.VK ?? "",
+        EK: (item.EK ?? "").replace(/\./g, ","),
+        VK: (item.VK ?? "").replace(/\./g, ","),
         Menge: item.Menge ?? "",
         Collection: item.Collection ?? "",
         Measurement: item.Measurement ?? "",
@@ -745,10 +745,10 @@ const Index = () => {
   // A column-visibility checkbox is forced on (and can't be unchecked) whenever any
   // row already has a value in that column — hiding the column would otherwise hide
   // data silently. Once every cell is empty again, the checkbox is free to toggle.
-  const kollektionHasData = useMemo(() => rows.some(r => r.Collection.trim() !== ""), [rows]);
-  const measurementHasData = useMemo(() => rows.some(r => r.Measurement.trim() !== ""), [rows]);
-  const infoMaterialHasData = useMemo(() => rows.some(r => r.InfoMaterial.trim() !== ""), [rows]);
-  const descriptionHasData = useMemo(() => rows.some(r => r.Description.trim() !== ""), [rows]);
+  const kollektionHasData = useMemo(() => rows.some(r => (r.Collection || "").trim() !== ""), [rows]);
+  const measurementHasData = useMemo(() => rows.some(r => (r.Measurement || "").trim() !== ""), [rows]);
+  const infoMaterialHasData = useMemo(() => rows.some(r => (r.InfoMaterial || "").trim() !== ""), [rows]);
+  const descriptionHasData = useMemo(() => rows.some(r => (r.Description || "").trim() !== ""), [rows]);
   const merkmaleHasData = useMemo(
     () => rows.some(r => (r.MerkmaleGroesse || "").trim() !== "" || (r.MerkmaleFarbe || "").trim() !== "" || (r.MerkmaleArt || "").trim() !== ""),
     [rows]
@@ -1217,18 +1217,14 @@ const Index = () => {
       
       if (cells.length > 0 && cells.some(c => c.trim() !== "")) {
         parsedRows.push({
-          id: crypto.randomUUID(),
+          ...createEmptyRow(),
           ItemName: safe(cells[0]),
-          Collection: "",
-          Measurement: "",
-          InfoMaterial: "",
-          WarenGruppe: "",
           color: safe(cells[1]),
           Size: safe(cells[2]),
           EAN: safe(cells[3]),
           HAN: safe(cells[4]),
-          EK: safe(cells[5]),
-          VK: safe(cells[6]),
+          EK: safe(cells[5]).replace(/\./g, ","),
+          VK: safe(cells[6]).replace(/\./g, ","),
           Menge: safe(cells[7]),
         });
       }
