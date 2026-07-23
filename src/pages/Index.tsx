@@ -836,7 +836,7 @@ const Index = () => {
   const [categoryPreviewOpen, setCategoryPreviewOpen] = useState(false);
   const [categoryPreviewRows, setCategoryPreviewRows] = useState<CategoryPreviewRow[]>([]);
   // Maps productName → confirmed categoryPath (persists across mapping runs like confirmedTexts)
-  const [confirmedCategories, setConfirmedCategories] = useState<Record<string, string>>({});
+  const [confirmedCategories, setConfirmedCategories] = useState<Record<string, string[]>>({});
   // Maps artikelnummer → productName so onConfirm can save back to confirmedCategories
   const [categoryArtikelToName, setCategoryArtikelToName] = useState<Record<string, string>>({});
 
@@ -2335,7 +2335,7 @@ const Index = () => {
     // Rule 3: skip already-confirmed products (like confirmedTexts reuse)
     const alreadyConfirmed: string[] = [];
     const needsClassification = priceEligible.filter(name => {
-      if (confirmedCategories[name]) { alreadyConfirmed.push(name); return false; }
+      if (confirmedCategories[name]?.length) { alreadyConfirmed.push(name); return false; }
       return true;
     });
 
@@ -2370,7 +2370,7 @@ const Index = () => {
 
     setIsMapping(true);
     try {
-      const generatedCategoryMap: Record<string, string> = { ...confirmedCategories };
+      const generatedCategoryMap: Record<string, string[]> = { ...confirmedCategories };
 
       if (toClassify.length > 0) {
         const items = toClassify.map(name => {
@@ -2396,15 +2396,15 @@ const Index = () => {
         const data = await res.json();
         if (!res.ok) throw new Error(data?.error || res.statusText);
 
-        const results: { artikelnummer: string; categoryPath: string }[] = data.results;
+        const results: { artikelnummer: string; categoryPaths: string[] }[] = data.results;
         toClassify.forEach((name, i) => {
-          generatedCategoryMap[name] = (results[i]?.categoryPath || "").trim();
+          generatedCategoryMap[name] = (results[i]?.categoryPaths || []).map(p => p.trim()).filter(Boolean);
         });
       }
 
       // Apply Warengruppe+Art reuse
       Object.entries(reuseFrom).forEach(([dst, src]) => {
-        generatedCategoryMap[dst] = generatedCategoryMap[src] || "";
+        generatedCategoryMap[dst] = generatedCategoryMap[src] || [];
       });
 
       toast({
@@ -2418,9 +2418,9 @@ const Index = () => {
       const previewRows: CategoryPreviewRow[] = [];
       priceEligible.forEach(name => {
         const { variants } = nameGroups[name];
-        const categoryPath = generatedCategoryMap[name] || "";
+        const categoryPaths = generatedCategoryMap[name] || [];
         variants.forEach(({ artnr, han, barcode }) => {
-          previewRows.push({ id: crypto.randomUUID(), artikelnummer: artnr, han, barcode, categoryPaths: categoryPath ? [categoryPath] : [] });
+          previewRows.push({ id: crypto.randomUUID(), artikelnummer: artnr, han, barcode, categoryPaths: [...categoryPaths] });
         });
       });
 
@@ -2438,10 +2438,10 @@ const Index = () => {
   };
 
   const handleCategoryConfirm = (confirmedRows: CategoryPreviewRow[]) => {
-    const updated: Record<string, string> = { ...confirmedCategories };
+    const updated: Record<string, string[]> = { ...confirmedCategories };
     confirmedRows.forEach(r => {
       const name = categoryArtikelToName[r.artikelnummer];
-      if (name) updated[name] = r.categoryPaths[0] || ""; // save primary path for next-run reuse
+      if (name) updated[name] = r.categoryPaths; // save all confirmed paths for next-run reuse
     });
     setConfirmedCategories(updated);
     exportCategoryCSV(confirmedRows);
