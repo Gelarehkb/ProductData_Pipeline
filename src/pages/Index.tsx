@@ -508,6 +508,11 @@ const Index = () => {
   const [jtlProductTypeDict, setJtlProductTypeDict] = useState<string[]>([]);
   const [isExtractingProductTypes, setIsExtractingProductTypes] = useState(false);
   const [dictionaryOpen, setDictionaryOpen] = useState(false);
+  // Name-column dictionary autocomplete: which row's suggestion list is open,
+  // and the currently matched product-type keywords for it.
+  const [nameSuggestRowId, setNameSuggestRowId] = useState<string | null>(null);
+  const [nameSuggestions, setNameSuggestions] = useState<string[]>([]);
+  const nameSuggestBlurTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleJtlImportUpload = useCallback(async (file: File) => {
     try {
@@ -1341,6 +1346,54 @@ const Index = () => {
         });
       }
     }
+  };
+
+  // Name-column dictionary autocomplete: filter jtlProductTypeDict against
+  // whatever's currently typed. Matches per word (not the whole string), so
+  // e.g. typing "Merino Blau sack" still surfaces "Schlafsack" because "sack"
+  // overlaps — the user isn't required to type the product type first.
+  const handleNameInputChange = (rowId: string, value: string) => {
+    handleCellChange(rowId, "ItemName", value);
+    const words = value.trim().toLowerCase().split(/\s+/).filter(w => w.length >= 2);
+    if (words.length === 0 || jtlProductTypeDict.length === 0) {
+      setNameSuggestRowId(null);
+      setNameSuggestions([]);
+      return;
+    }
+    const matches = jtlProductTypeDict
+      .filter(p => {
+        const pl = p.toLowerCase();
+        return words.some(w => pl.includes(w));
+      })
+      .slice(0, 8);
+    if (matches.length === 0) {
+      setNameSuggestRowId(null);
+      setNameSuggestions([]);
+      return;
+    }
+    setNameSuggestRowId(rowId);
+    setNameSuggestions(matches);
+  };
+
+  // Picking a suggestion prepends it as the first word — it never replaces
+  // what's already in the cell.
+  const handleNameSuggestPick = (rowId: string, suggestion: string) => {
+    const row = rows.find(r => r.id === rowId);
+    const current = (row?.ItemName || "").trim();
+    const already = current.toLowerCase().startsWith(suggestion.toLowerCase());
+    const next = already ? current : [suggestion, current].filter(Boolean).join(" ");
+    handleCellChange(rowId, "ItemName", next);
+    setNameSuggestRowId(null);
+    setNameSuggestions([]);
+  };
+
+  const handleNameInputBlur = () => {
+    // Delay so a click on a suggestion registers before the list unmounts.
+    if (nameSuggestBlurTimeout.current) clearTimeout(nameSuggestBlurTimeout.current);
+    nameSuggestBlurTimeout.current = setTimeout(() => {
+      setNameSuggestRowId(null);
+      setNameSuggestions([]);
+    }, 150);
   };
 
   const handleUndo = () => {
@@ -3092,6 +3145,36 @@ const Index = () => {
                                   onDoubleClick={(e) => { e.stopPropagation(); handleFillDoubleClick(rowIndex, colIndex); }}
                                   title={t("fillDoubleClick", lang)}
                                 />
+                              )}
+                            </div>
+                          ) : col.key === "ItemName" ? (
+                            <div className="relative">
+                              <input
+                                type="text"
+                                value={cellValue}
+                                onChange={(e) => handleNameInputChange(row.id, e.target.value)}
+                                onFocus={() => handleNameInputChange(row.id, cellValue)}
+                                onBlur={handleNameInputBlur}
+                                onPaste={(e) => handleCellPaste(e, rowIndex, colIndex, col.key)}
+                                onKeyDown={(e) => handleKeyNavigation(e, rowIndex, colIndex)}
+                                data-row={rowIndex}
+                                data-col={colIndex}
+                                autoComplete="off"
+                                className="w-full px-2 py-1.5 bg-transparent border-none outline-none focus:ring-2 focus:ring-primary/50 text-sm pr-6"
+                              />
+                              {nameSuggestRowId === row.id && nameSuggestions.length > 0 && (
+                                <div className="absolute left-0 top-full z-30 w-max min-w-full max-w-xs rounded-md border border-border bg-popover shadow-md py-1">
+                                  {nameSuggestions.map(s => (
+                                    <button
+                                      key={s}
+                                      type="button"
+                                      onMouseDown={(e) => { e.preventDefault(); handleNameSuggestPick(row.id, s); }}
+                                      className="w-full text-left px-2 py-1 text-sm hover:bg-accent"
+                                    >
+                                      {s}
+                                    </button>
+                                  ))}
+                                </div>
                               )}
                             </div>
                           ) : col.key === "Description" ? (
