@@ -386,12 +386,12 @@ const mapColorToMerkmaleFarbe = (color: string, options: string[]): string => {
 
 const AUFSE_WARENGRUPPEN = ["Kleidung Basics", "Kleidung Funktion", "Kleidung Mode"];
 
-const artikelnummerBuilder = (KRZL: string, name: string, color: string, size: string, warengruppe: string = "", aufSe: string = ""): string => {
+const artikelnummerBuilder = (KRZL: string, name: string, color: string, size: string, warengruppe: string = "", seasonalCode: string = ""): string => {
   const cleanName = stripForbiddenChars(name);
   const cleanColor = stripForbiddenChars(color);
-  const includeAufSe = aufSe.trim() !== "" && AUFSE_WARENGRUPPEN.includes(warengruppe);
+  const includeSeasonalCode = seasonalCode.trim() !== "" && AUFSE_WARENGRUPPEN.includes(warengruppe);
   const parts = [KRZL.toUpperCase()];
-  if (includeAufSe) parts.push(stripForbiddenChars(aufSe).toUpperCase());
+  if (includeSeasonalCode) parts.push(stripForbiddenChars(seasonalCode).toUpperCase());
   parts.push(toProperCase(cleanName), cleanColor.toLowerCase());
   const filtered = parts.filter(Boolean);
   if (size !== "") {
@@ -489,6 +489,11 @@ const Index = () => {
   const [auf, setAuf] = useState("2");
   const [ab, setAb] = useState("1");
   const [aufSe, setAufSe] = useState("");
+  // Separate from "Auffüll Season" (which is pure data for the export's
+  // Auffüllen-Saison columns): this drives the old name-building behavior —
+  // for clothing Warengruppen it gets shortened/uppercased and appended after
+  // KURZL in the Artikelnummer — but never appears as its own export column.
+  const [seasonalCode, setSeasonalCode] = useState("");
   const [lieferzeit, setLieferzeit] = useState("14");
   const [verfuegbarkeit, setVerfuegbarkeit] = useState("3 - 5 Werktage");
   // Separate from the "Rabatt %" summary field below the grid: this one actually
@@ -2323,7 +2328,7 @@ const Index = () => {
       const name = getClothName(r).trim();
       if (!name) return;
       const wg = r.WarenGruppe || "";
-      const artnr = artikelnummerBuilder(kurzl, name, r.color || "", "", wg, aufSe);
+      const artnr = artikelnummerBuilder(kurzl, name, r.color || "", "", wg, seasonalCode);
       if (!nameGroups[name]) nameGroups[name] = { first: r, variants: [] };
       if (!nameGroups[name].variants.find(v => v.artnr === artnr)) {
         nameGroups[name].variants.push({ artnr, han: r.HAN || "", barcode: r.EAN || "" });
@@ -2338,7 +2343,7 @@ const Index = () => {
         if (variants.length > 1) {
           const wg = first.WarenGruppe || "";
           // Vater has same artikelnummer as first color variant in our builder (empty size/color slot)
-          const vaterArtnr = artikelnummerBuilder(kurzl, name, first.color || "", "", wg, aufSe);
+          const vaterArtnr = artikelnummerBuilder(kurzl, name, first.color || "", "", wg, seasonalCode);
           artikelToName[vaterArtnr] = name;
         }
       });
@@ -2397,7 +2402,7 @@ const Index = () => {
         const items = toClassify.map(name => {
           const { first } = nameGroups[name];
           const wg = first.WarenGruppe || "";
-          const artnr = artikelnummerBuilder(kurzl, name, first.color || "", "", wg, aufSe);
+          const artnr = artikelnummerBuilder(kurzl, name, first.color || "", "", wg, seasonalCode);
           return {
             artikelnummer: artnr,
             artikelname: name,
@@ -2472,6 +2477,7 @@ const Index = () => {
     const AufAB = parseInt(ab) || 1;
     const AufAuf = parseInt(auf) || 2;
     const AufSe = aufSe;
+    const SeasonalCode = seasonalCode;
     const Lieferstatus = verfuegbarkeit || "3 - 5 Werktage";
     const LieferzeitVal = parseInt(lieferzeit) || 14;
 
@@ -2523,7 +2529,7 @@ const Index = () => {
 
       if (hasParent) {
         const firstRowWarengruppe = groupRows[0]?.WarenGruppe || "";
-        const vaterArtikelnummer = artikelnummerBuilder(kurzl, name, color, "", firstRowWarengruppe, AufSe);
+        const vaterArtikelnummer = artikelnummerBuilder(kurzl, name, color, "", firstRowWarengruppe, SeasonalCode);
         const toNum = (v: string) => {
           const n = parseFloat((v || "").replace(",", "."));
           return isNaN(n) ? Infinity : n;
@@ -2542,7 +2548,7 @@ const Index = () => {
 
       groupRows.forEach(r => {
         const wg = r.WarenGruppe || "";
-        const artikelnummer = artikelnummerBuilder(kurzl, name, color, r.Size, wg, AufSe);
+        const artikelnummer = artikelnummerBuilder(kurzl, name, color, r.Size, wg, SeasonalCode);
         const eanVal = safe(r.EAN) || "";
         const hanVal = safe(r.HAN) || "";
         const rowGroesse = (r.MerkmaleGroesse || "").split(",").map(v => v.trim()).filter(Boolean).join(", ");
@@ -2550,7 +2556,7 @@ const Index = () => {
         const rowFarbe = (r.MerkmaleFarbe || "").split(",").map(v => v.trim()).filter(Boolean).join(", ");
         outputRows.push(buildRow(
           artikelnummer,
-          hasParent ? artikelnummerBuilder(kurzl, name, color, "", wg, AufSe) : "",
+          hasParent ? artikelnummerBuilder(kurzl, name, color, "", wg, SeasonalCode) : "",
           name,
           r.Size,
           color,
@@ -2746,9 +2752,34 @@ const Index = () => {
             
             <div className="space-y-1">
               <Label htmlFor="aufSe" className="text-xs">{t("auffuellSeason", lang)}</Label>
-              <Input id="aufSe" value={aufSe} onChange={(e) => setAufSe(e.target.value)} placeholder="z.B. SS25" className="w-28" />
+              <Input
+                id="aufSe"
+                value={aufSe}
+                onChange={(e) => setAufSe(e.target.value)}
+                placeholder="z.B. SS25"
+                title={lang === "DE"
+                  ? "Freitext (Buchstaben/Zahlen) — landet nur in der Auffüllen-Saison-Spalte im Export, nicht im Artikelnamen/Artikelnummer."
+                  : "Free text (letters/numbers) — only goes into the export's Auffüllen-Saison column, never into the article name/number."}
+                className="w-28"
+              />
             </div>
-            
+
+            <div className="space-y-1">
+              <Label htmlFor="seasonalCode" className="text-xs whitespace-nowrap">
+                {lang === "DE" ? "Saisoncode" : "Seasonal Code"}
+              </Label>
+              <Input
+                id="seasonalCode"
+                value={seasonalCode}
+                onChange={(e) => setSeasonalCode(e.target.value)}
+                placeholder="z.B. SS25"
+                title={lang === "DE"
+                  ? "Wird bei Kleidung (Kleidung Basics/Funktion/Mode) verkürzt nach dem KURZL in Artikelname/Artikelnummer eingefügt — erscheint als eigene Spalte NICHT im Export."
+                  : "For clothing (Kleidung Basics/Funktion/Mode) it's shortened and inserted after KURZL in the article name/number — never appears as its own export column."}
+                className="w-28"
+              />
+            </div>
+
             <div className="space-y-1">
               <Label htmlFor="lieferzeit" className="text-xs">{t("lieferzeit", lang)}</Label>
               <Input id="lieferzeit" inputMode="numeric" pattern="[0-9]*" value={lieferzeit} onChange={(e) => setLieferzeit(e.target.value.replace(/[^0-9]/g, ''))} placeholder="14" className="w-14" />
