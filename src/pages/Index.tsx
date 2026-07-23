@@ -319,8 +319,12 @@ const evaluateFormula = (
   }
 };
 
+const capitalizeWord = (w: string): string => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+
+// Title-cases each word, treating hyphens as internal word boundaries too —
+// otherwise a compound like "Bio-Baumwolle" would come out "Bio-baumwolle".
 const toProperCase = (s: string): string =>
-  s.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+  s.split(' ').map(w => w.split('-').map(capitalizeWord).join('-')).join(' ');
 
 // Map a Size value to the best matching MerkmaleGroesse option
 const mapSizeToMerkmaleGroesse = (size: string, options: string[]): string => {
