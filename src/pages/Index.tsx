@@ -2117,7 +2117,11 @@ const Index = () => {
       if (!_name || seen.has(_name)) return;
       seen.add(_name);
       allItems.push({
-        artikelname: _name,
+        // Send the AI the same Title-Case, hyphen-aware name that ends up in the
+        // exported "Artikelname/Etikettenname" (minus color, which is per-variant
+        // and this text is shared across a product's color variants) — not the
+        // raw UI Name column — so generated text matches what's actually exported.
+        artikelname: toProperCase(_name),
         han: safe(r.HAN),
         markenname: hersteller.trim(),
         beschreibung: safe(r.Description),
@@ -2199,7 +2203,11 @@ const Index = () => {
       Object.entries(reuseFrom).forEach(([dst, src]) => {
         const srcTx = generatedMap[src];
         if (!srcTx) return;
-        const swap = (s: string) => (s && src ? s.split(src).join(dst) : s);
+        // Generated text contains the Proper-Cased name (that's what was sent to
+        // the AI), so swap on that form, not the raw dst/src keys.
+        const srcName = toProperCase(src);
+        const dstName = toProperCase(dst);
+        const swap = (s: string) => (s && srcName ? s.split(srcName).join(dstName) : s);
         generatedMap[dst] = {
           produkttext: swap(srcTx.produkttext),
           Title_Tag: swap(srcTx.Title_Tag),
