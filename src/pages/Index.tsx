@@ -2173,7 +2173,7 @@ const Index = () => {
     });
 
     const seen = new Set<string>();
-    const allItems: { artikelname: string; han: string; markenname: string; beschreibung: string; warengruppe: string; art: string; _name: string }[] = [];
+    const allItems: { artikelname: string; han: string; markenname: string; beschreibung: string; warengruppe: string; art: string; infoMaterial: string; _name: string }[] = [];
     rows.forEach(r => {
       const _name = getClothName(r);
       if (!_name || seen.has(_name)) return;
@@ -2189,6 +2189,7 @@ const Index = () => {
         beschreibung: safe(r.Description),
         warengruppe: safe(r.WarenGruppe),
         art: safe(r.MerkmaleArt),
+        infoMaterial: safe(r.InfoMaterial),
         _name,
       });
     });
@@ -2224,8 +2225,14 @@ const Index = () => {
         const COMPLEX_WG = new Set(["KiWa", "Möbel"]);
         const isComplex = (it: typeof toGenerate[number]) =>
           COMPLEX_WG.has((it.warengruppe || "").trim()) || /Autositz/i.test(it.art || "");
-        const complexItems = toGenerate.filter(isComplex);
-        const simpleItems = toGenerate.filter(it => !isComplex(it));
+        const isClothing = (it: typeof toGenerate[number]) => {
+          const wg = (it.warengruppe || "").trim().toLowerCase();
+          return wg.includes("kleidung") || wg === "accessoires";
+        };
+        const clothingItems = toGenerate.filter(isClothing);
+        const nonClothing = toGenerate.filter(it => !isClothing(it));
+        const complexItems = nonClothing.filter(isComplex);
+        const simpleItems = nonClothing.filter(it => !isComplex(it));
 
         const invokeBatch = async (fn: string, batch: typeof toGenerate) => {
           if (batch.length === 0) return;
@@ -2259,6 +2266,7 @@ const Index = () => {
         await Promise.all([
           invokeBatch("generate-online-texts-simple", simpleItems),
           invokeBatch("generate-online-texts-complex", complexItems),
+          invokeBatch("generate-online-texts-clothing", clothingItems),
         ]);
       }
 

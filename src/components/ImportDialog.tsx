@@ -4,8 +4,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Upload, FileSpreadsheet } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Upload, FileSpreadsheet, ChevronDown } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { type Lang } from "@/lib/translations";
 
@@ -34,7 +36,7 @@ interface ImportDialogProps {
   lang: Lang;
 }
 
-const TARGET_FIELDS: { key: ImportTargetField; labelDE: string; labelEN: string }[] = [
+const TARGET_FIELDS: { key: ImportTargetField; labelDE: string; labelEN: string; allowMultiple?: boolean }[] = [
   { key: "ItemName", labelDE: "Name", labelEN: "Name" },
   { key: "color", labelDE: "Farbe", labelEN: "Color" },
   { key: "Size", labelDE: "Größe", labelEN: "Sizes" },
@@ -46,10 +48,46 @@ const TARGET_FIELDS: { key: ImportTargetField; labelDE: string; labelEN: string 
   { key: "Collection", labelDE: "Kollektion", labelEN: "Collection" },
   { key: "Measurement", labelDE: "Maß", labelEN: "Measurement" },
   { key: "InfoMaterial", labelDE: "Info/Material", labelEN: "Info/Material" },
-  { key: "Description", labelDE: "Beschreibung", labelEN: "Description" },
+  { key: "Description", labelDE: "Beschreibung", labelEN: "Description", allowMultiple: true },
 ];
 
 const NONE_VALUE = "__none__";
+
+// Multi-column picker — used for fields (e.g. Description) that may be
+// assembled from several source columns, joined with ", " on import.
+function ColumnMultiSelect({
+  headers, values, onChange, placeholder,
+}: { headers: string[]; values: number[]; onChange: (v: number[]) => void; placeholder: string }) {
+  const [open, setOpen] = useState(false);
+  const toggle = (idx: number) => {
+    onChange(values.includes(idx) ? values.filter(v => v !== idx) : [...values, idx]);
+  };
+  const displayText = values.length > 0 ? values.map(i => headers[i]).join(", ") : "";
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="h-8 flex items-center justify-between px-2 border rounded-md bg-transparent text-xs text-left"
+          style={{ width: "4cm" }}
+        >
+          <span className="truncate flex-1">
+            {displayText || <span className="text-muted-foreground">{placeholder}</span>}
+          </span>
+          <ChevronDown className="h-3.5 w-3.5 opacity-50 shrink-0" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-56 p-2 bg-background z-50 max-h-60 overflow-y-auto" align="start">
+        {headers.map((h, i) => (
+          <label key={i} className="flex items-center gap-2 px-2 py-1.5 hover:bg-accent rounded cursor-pointer text-xs">
+            <Checkbox checked={values.includes(i)} onCheckedChange={() => toggle(i)} />
+            <span className="truncate">{h}</span>
+          </label>
+        ))}
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 // ---- Quote-aware CSV parser ----
 function parseCsvQuoteAware(text: string, delimiter: string): string[][] {
@@ -99,8 +137,8 @@ function stripBom(s: string): string {
 }
 
 // Auto-guess mapping from header name to target field
-function autoGuessMapping(headers: string[]): Record<ImportTargetField, number> {
-  const map: Record<string, number> = {};
+function autoGuessMapping(headers: string[]): Record<ImportTargetField, number[]> {
+  const map: Partial<Record<ImportTargetField, number[]>> = {};
   const lower = headers.map(h => (h ?? "").toString().toLowerCase().trim());
   const find = (...keywords: string[]): number => {
     for (let i = 0; i < lower.length; i++) {
@@ -110,19 +148,20 @@ function autoGuessMapping(headers: string[]): Record<ImportTargetField, number> 
     }
     return -1;
   };
-  map.ItemName = find("name", "artikelname", "bezeichnung", "title", "produkt", "style name", "style");
-  map.color = find("farbe", "color", "colour", "farve");
-  map.Size = find("größe", "groesse", "size", "sizes", "str.", "str ");
-  map.EAN = find("ean", "barcode", "gtin");
-  map.HAN = find("han", "sku", "artikelnummer", "art.nr", "artnr", "style number", "style no", "item no");
-  map.EK = find("ek", "einkauf", "cost", "wholesale", "wsp", "wholesaleprice");
-  map.VK = find("vk", "verkauf", "rrp", "msrp", "uvp", "retail", "price", "preis");
-  map.Menge = find("menge", "qty", "quantity", "anzahl", "stk");
-  map.Collection = find("kollektion", "collection", "serie", "brand");
-  map.Measurement = find("maß", "mass", "measurement", "dimension", "size cm", "größe maß");
-  map.InfoMaterial = find("material", "info", "fabric", "composition");
-  map.Description = find("beschreibung", "description", "details", "text");
-  return map as Record<ImportTargetField, number>;
+  const set = (field: ImportTargetField, idx: number) => { if (idx >= 0) map[field] = [idx]; };
+  set("ItemName", find("name", "artikelname", "bezeichnung", "title", "produkt", "style name", "style"));
+  set("color", find("farbe", "color", "colour", "farve"));
+  set("Size", find("größe", "groesse", "size", "sizes", "str.", "str "));
+  set("EAN", find("ean", "barcode", "gtin"));
+  set("HAN", find("han", "sku", "artikelnummer", "art.nr", "artnr", "style number", "style no", "item no"));
+  set("EK", find("ek", "einkauf", "cost", "wholesale", "wsp", "wholesaleprice"));
+  set("VK", find("vk", "verkauf", "rrp", "msrp", "uvp", "retail", "price", "preis"));
+  set("Menge", find("menge", "qty", "quantity", "anzahl", "stk"));
+  set("Collection", find("kollektion", "collection", "serie", "brand"));
+  set("Measurement", find("maß", "mass", "measurement", "dimension", "size cm", "größe maß"));
+  set("InfoMaterial", find("material", "info", "fabric", "composition"));
+  set("Description", find("beschreibung", "description", "details", "text"));
+  return map as Record<ImportTargetField, number[]>;
 }
 
 export const ImportDialog = ({ open, onOpenChange, onImport, lang }: ImportDialogProps) => {
@@ -133,7 +172,7 @@ export const ImportDialog = ({ open, onOpenChange, onImport, lang }: ImportDialo
   const [dataRows, setDataRows] = useState<string[][]>([]);
   const [headerRowIndex, setHeaderRowIndex] = useState<number>(0); // -1 means "no header"
   const [rawRows, setRawRows] = useState<string[][]>([]); // before header split
-  const [mapping, setMapping] = useState<Record<ImportTargetField, number>>({} as Record<ImportTargetField, number>);
+  const [mapping, setMapping] = useState<Record<ImportTargetField, number[]>>({} as Record<ImportTargetField, number[]>);
   const [loading, setLoading] = useState(false);
 
   const reset = () => {
@@ -141,7 +180,7 @@ export const ImportDialog = ({ open, onOpenChange, onImport, lang }: ImportDialo
     setHeaders([]);
     setDataRows([]);
     setRawRows([]);
-    setMapping({} as Record<ImportTargetField, number>);
+    setMapping({} as Record<ImportTargetField, number[]>);
     setHeaderRowIndex(0);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
@@ -160,7 +199,7 @@ export const ImportDialog = ({ open, onOpenChange, onImport, lang }: ImportDialo
       const h = Array.from({ length: colCount }, (_, i) => `Spalte ${i + 1}`);
       setHeaders(h);
       setDataRows(rows);
-      setMapping({} as Record<ImportTargetField, number>);
+      setMapping({} as Record<ImportTargetField, number[]>);
     }
   };
 
@@ -226,7 +265,16 @@ export const ImportDialog = ({ open, onOpenChange, onImport, lang }: ImportDialo
     setMapping(prev => {
       const next = { ...prev };
       if (value === NONE_VALUE) delete next[field];
-      else next[field] = parseInt(value, 10);
+      else next[field] = [parseInt(value, 10)];
+      return next;
+    });
+  };
+
+  const setFieldMappingMulti = (field: ImportTargetField, values: number[]) => {
+    setMapping(prev => {
+      const next = { ...prev };
+      if (values.length === 0) delete next[field];
+      else next[field] = values;
       return next;
     });
   };
@@ -235,10 +283,11 @@ export const ImportDialog = ({ open, onOpenChange, onImport, lang }: ImportDialo
     const out: Partial<Record<ImportTargetField, string>>[] = dataRows.map(row => {
       const obj: Partial<Record<ImportTargetField, string>> = {};
       (Object.keys(mapping) as ImportTargetField[]).forEach(f => {
-        const idx = mapping[f];
-        if (idx !== undefined && idx >= 0) {
-          obj[f] = row[idx] ?? "";
-        }
+        const idxs = mapping[f];
+        if (!idxs || idxs.length === 0) return;
+        obj[f] = idxs.length === 1
+          ? (row[idxs[0]] ?? "")
+          : idxs.map(idx => (row[idx] ?? "").toString().trim()).filter(v => v !== "").join(", ");
       });
       return obj;
     });
@@ -340,20 +389,29 @@ export const ImportDialog = ({ open, onOpenChange, onImport, lang }: ImportDialo
                   {TARGET_FIELDS.map(f => (
                     <div key={f.key} className="space-y-1">
                       <Label className="text-xs">{lang === "DE" ? f.labelDE : f.labelEN}</Label>
-                      <Select
-                        value={mapping[f.key] !== undefined ? String(mapping[f.key]) : NONE_VALUE}
-                        onValueChange={(v) => setFieldMapping(f.key, v)}
-                      >
-                        <SelectTrigger className="h-8 text-xs" style={{ width: "4cm" }}>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={NONE_VALUE}>— {lang === "DE" ? "keine" : "none"} —</SelectItem>
-                          {headers.map((h, i) => (
-                            <SelectItem key={i} value={String(i)}>{h}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      {f.allowMultiple ? (
+                        <ColumnMultiSelect
+                          headers={headers}
+                          values={mapping[f.key] || []}
+                          onChange={(vals) => setFieldMappingMulti(f.key, vals)}
+                          placeholder={lang === "DE" ? "Spalten wählen..." : "Select columns..."}
+                        />
+                      ) : (
+                        <Select
+                          value={mapping[f.key]?.[0] !== undefined ? String(mapping[f.key][0]) : NONE_VALUE}
+                          onValueChange={(v) => setFieldMapping(f.key, v)}
+                        >
+                          <SelectTrigger className="h-8 text-xs" style={{ width: "4cm" }}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={NONE_VALUE}>— {lang === "DE" ? "keine" : "none"} —</SelectItem>
+                            {headers.map((h, i) => (
+                              <SelectItem key={i} value={String(i)}>{h}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
                     </div>
                   ))}
                 </div>

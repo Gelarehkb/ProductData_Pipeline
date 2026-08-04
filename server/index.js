@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import generateSimple from './routes/generate-simple.js';
 import generateComplex from './routes/generate-complex.js';
+import generateClothing from './routes/generate-clothing.js';
 import mapCategories from './routes/map-categories.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -494,6 +495,7 @@ app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
 app.use('/api/generate-online-texts-simple', generateSimple);
 app.use('/api/generate-online-texts-complex', generateComplex);
+app.use('/api/generate-online-texts-clothing', generateClothing);
 app.use('/api/map-categories', mapCategories);
 
 // Serve built frontend in production
