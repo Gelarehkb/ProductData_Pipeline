@@ -18,15 +18,15 @@ router.post('/', async (req, res) => {
 
     const prompt = `Du bist ein Experte für Artikel-Namenskonventionen im JTL-Warenwirtschaftssystem von herrundfrauklein.com, einem österreichischen Kinderladen.
 
-Für JEDES neue Produkt bekommst du ein paar echte, bereits im Shop existierende Beispiel-Artikel aus derselben Warengruppe/demselben Hersteller. Leite aus diesen Beispielen das tatsächliche Namensschema ab — Präfixe, Groß-/Kleinschreibung, Trennzeichen, ob und wie Größe/Farbe in die Artikelnummer einfließen, HAN-Formatierung — und wende es auf das neue Produkt an. Erfinde KEIN neues Schema, wenn Beispiele vorhanden sind: kopiere das erkennbare Muster so genau wie möglich.
+Für JEDES neue Produkt bekommst du mehrere echte, bereits im Shop existierende Beispiel-Artikel als Referenz (matchTier zeigt an, wie eng verwandt sie sind: "warengruppe+name" = gleiche Warengruppe UND ähnlicher Produktname — sehr enge Referenz; "warengruppe" = gleiche Warengruppe; "name-similarity" = ähnlicher Produktname, andere Warengruppe; "generic" = keine direkte Übereinstimmung, dient nur als allgemeine Stilprobe des Shops).
 
-Wenn ein Produkt keine Beispiele hat (leeres "examples"-Array, matchTier "none"), gib "artikelnummer" und "artikelname" als leeren String zurück (der Aufrufer verwendet dann die Standard-Formel) und "han" ebenfalls leer.
+PFLICHT: Leite aus den Beispielen das TATSÄCHLICHE Namensschema ab, das dort sichtbar ist — Präfixe/Kürzel, Groß-/Kleinschreibung, Trennzeichen (Leerzeichen, Bindestrich, Unterstrich), Reihenfolge der Bestandteile, ob und wie Größe/Farbe in die Artikelnummer einfließen. Kopiere dieses Muster SO GENAU WIE MÖGLICH auf das neue Produkt — erfinde kein eigenes Schema. Bei matchTier "generic" gibt es keine exakte Vorlage: wende trotzdem den allgemeinen Stil (Groß-/Kleinschreibung, typische Kürzel-Länge, Trennzeichen) an, den du aus den Beispielen erkennst, statt komplett neu zu erfinden. Du MUSST für jedes Produkt eine artikelnummer und einen artikelname zurückgeben — niemals leer lassen.
 
 "han" nur befüllen, wenn aus den Beispielen ein klares Formatierungsmuster erkennbar ist (z.B. Padding, Präfix) — HAN ist ein echter Lieferantencode, keine Erfindung. Wenn unklar: leerer String zurückgeben, dann bleibt der vom Nutzer eingegebene HAN-Wert unverändert.
 
 Neue Produkte (${items.length} Stück):
-${items.map((it, i) => `${i + 1}. id="${it.id}" | Name: "${it.itemName || ''}" ${it.collection ? `| Kollektion: "${it.collection}" ` : ''}${it.measurement ? `| Maß: "${it.measurement}" ` : ''}${it.infoMaterial ? `| Info/Material: "${it.infoMaterial}" ` : ''}| Farbe: "${it.color || ''}" | Größe: "${it.size || ''}" | Warengruppe: "${it.warengruppe || ''}" | Hersteller: "${it.hersteller || ''}" | matchTier: "${it.matchTier || 'none'}"
-   Beispiele aus JTL: ${(it.examples || []).length === 0 ? '(keine)' : (it.examples || []).map(ex => `[Artikelnummer="${ex.artikelnummer}" Artikelname="${ex.artikelname}" HAN="${ex.han}"]`).join(', ')}`).join('\n')}
+${items.map((it, i) => `${i + 1}. id="${it.id}" | Name: "${it.itemName || ''}" ${it.collection ? `| Kollektion: "${it.collection}" ` : ''}${it.measurement ? `| Maß: "${it.measurement}" ` : ''}${it.infoMaterial ? `| Info/Material: "${it.infoMaterial}" ` : ''}| Farbe: "${it.color || ''}" | Größe: "${it.size || ''}" | Warengruppe: "${it.warengruppe || ''}" | Hersteller: "${it.hersteller || ''}" | matchTier: "${it.matchTier || 'generic'}"
+   Referenzartikel aus JTL: ${(it.examples || []).map(ex => `[Artikelnummer="${ex.artikelnummer}" Artikelname="${ex.artikelname}" HAN="${ex.han}"]`).join(', ')}`).join('\n')}
 
 Antworte NUR mit JSON ohne Markdown, exakt ${items.length} Einträge in derselben Reihenfolge wie die Eingabe:
 {"results":[{"id":"...","artikelnummer":"...","artikelname":"...","han":"","confidence":"high"|"low"}]}`;

@@ -13,11 +13,13 @@ export interface AIIdentifierPreviewRow {
   suggestedArtikelnummer: string;
   suggestedArtikelname: string;
   suggestedHan: string;
-  matchTier: "warengruppe+hersteller" | "warengruppe" | "hersteller" | "none";
+  suggestedHersteller: string;
+  suggestedLieferant: string;
+  matchTier: "warengruppe+name" | "warengruppe" | "name-similarity" | "generic";
   exampleArtikelnummern?: string[];
 }
 
-type EditableCol = "suggestedArtikelnummer" | "suggestedArtikelname" | "suggestedHan";
+type EditableCol = "suggestedArtikelnummer" | "suggestedArtikelname" | "suggestedHan" | "suggestedHersteller" | "suggestedLieferant";
 
 interface Props {
   open: boolean;
@@ -28,10 +30,10 @@ interface Props {
 }
 
 const MATCH_TIER_LABEL: Record<AIIdentifierPreviewRow["matchTier"], { DE: string; EN: string }> = {
-  "warengruppe+hersteller": { DE: "Warengruppe + Hersteller", EN: "Category + Manufacturer" },
+  "warengruppe+name": { DE: "Warengruppe + ähnlicher Name", EN: "Category + similar name" },
   "warengruppe": { DE: "nur Warengruppe", EN: "category only" },
-  "hersteller": { DE: "nur Hersteller", EN: "manufacturer only" },
-  "none": { DE: "Keine Referenz — Formel verwendet", EN: "No reference — used formula" },
+  "name-similarity": { DE: "ähnlicher Produktname", EN: "similar product name" },
+  "generic": { DE: "keine direkte Übereinstimmung — allgemeiner Stil", EN: "no direct match — general style" },
 };
 
 export const AIIdentifierPreviewModal = ({ open, onOpenChange, initialRows, onConfirm, lang }: Props) => {
@@ -132,6 +134,8 @@ export const AIIdentifierPreviewModal = ({ open, onOpenChange, initialRows, onCo
                 <th className="border px-2 py-1 text-left font-medium whitespace-nowrap" style={{ width: 200 }}>{lang === "DE" ? "Vorschlag Artikelnummer" : "Suggested Artikelnummer"}</th>
                 <th className="border px-2 py-1 text-left font-medium whitespace-nowrap" style={{ width: 200 }}>{lang === "DE" ? "Vorschlag Artikelname" : "Suggested Artikelname"}</th>
                 <th className="border px-2 py-1 text-left font-medium whitespace-nowrap" style={{ width: 140 }}>{lang === "DE" ? "Vorschlag HAN" : "Suggested HAN"}</th>
+                <th className="border px-2 py-1 text-left font-medium whitespace-nowrap" style={{ width: 150 }}>{lang === "DE" ? "Vorschlag Hersteller" : "Suggested Manufacturer"}</th>
+                <th className="border px-2 py-1 text-left font-medium whitespace-nowrap" style={{ width: 150 }}>{lang === "DE" ? "Vorschlag Lieferant" : "Suggested Supplier"}</th>
               </tr>
             </thead>
             <tbody>
@@ -142,8 +146,8 @@ export const AIIdentifierPreviewModal = ({ open, onOpenChange, initialRows, onCo
                   <td className="border px-2 py-1 bg-muted/30 text-muted-foreground">{row.size}</td>
                   <td className="border px-2 py-1 bg-muted/30 text-muted-foreground truncate" title={row.warengruppe}>{row.warengruppe}</td>
                   <td className="border px-2 py-1 text-muted-foreground truncate" title={(row.exampleArtikelnummern || []).join(", ")}>
-                    {row.matchTier === "none" ? (
-                      <span className="text-amber-600 dark:text-amber-500">{MATCH_TIER_LABEL.none[lang]}</span>
+                    {row.matchTier === "generic" ? (
+                      <span className="text-amber-600 dark:text-amber-500">{MATCH_TIER_LABEL.generic[lang]}</span>
                     ) : (
                       <span>
                         {MATCH_TIER_LABEL[row.matchTier][lang]}
@@ -172,11 +176,25 @@ export const AIIdentifierPreviewModal = ({ open, onOpenChange, initialRows, onCo
                       onChange={e => setCell(row.id, "suggestedHan", e.target.value)}
                     />
                   </td>
+                  <td className="border p-0">
+                    <input
+                      className="w-full h-7 px-2 bg-transparent border-none outline-none focus:ring-2 focus:ring-primary/50 text-xs"
+                      value={row.suggestedHersteller}
+                      onChange={e => setCell(row.id, "suggestedHersteller", e.target.value)}
+                    />
+                  </td>
+                  <td className="border p-0">
+                    <input
+                      className="w-full h-7 px-2 bg-transparent border-none outline-none focus:ring-2 focus:ring-primary/50 text-xs"
+                      value={row.suggestedLieferant}
+                      onChange={e => setCell(row.id, "suggestedLieferant", e.target.value)}
+                    />
+                  </td>
                 </tr>
               ))}
               {displayRows.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="border px-4 py-6 text-center text-muted-foreground text-xs">
+                  <td colSpan={10} className="border px-4 py-6 text-center text-muted-foreground text-xs">
                     {filterText ? (lang === "DE" ? "Keine Treffer." : "No matches.") : (lang === "DE" ? "Keine Daten." : "No data.")}
                   </td>
                 </tr>

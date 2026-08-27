@@ -70,22 +70,63 @@ const MERKMALE_GROESSE_MATCH_OPTIONS = [
   "S1 (0-3M)", "S2 (3-6M)", "S3 (6-12M)", "S4 (12-24M)", "S5 (36-48M)",
 ];
 
-type MatchTier = "warengruppe+hersteller" | "warengruppe" | "hersteller" | "none";
+type MatchTier = "warengruppe+name" | "warengruppe" | "name-similarity" | "generic";
 
-function buildNamingCandidates(row: ClothRow, catalog: JtlCatalogRow[], herstellerGlobal: string): { examples: JtlCatalogRow[]; matchTier: MatchTier } {
+interface NamingCandidates {
+  examples: JtlCatalogRow[];
+  matchTier: MatchTier;
+  resolvedHersteller: string;
+  resolvedLieferant: string;
+}
+
+function mostCommon(values: string[]): string {
+  const counts = new Map<string, number>();
+  values.filter(Boolean).forEach(v => counts.set(v, (counts.get(v) || 0) + 1));
+  let best = "";
+  let bestCount = 0;
+  counts.forEach((count, value) => { if (count > bestCount) { best = value; bestCount = count; } });
+  return best;
+}
+
+// Scores every catalog row against the new product (Warengruppe match + word
+// overlap with the real Artikelname) instead of a strict tiered filter — a
+// strict filter went to "no reference" (and skipped the AI call entirely)
+// far too easily whenever the exact Warengruppe/Hersteller didn't line up.
+// Hersteller/Lieferant are never typed manually — they're read straight off
+// whichever JTL rows end up matched.
+function buildNamingCandidates(row: ClothRow, catalog: JtlCatalogRow[]): NamingCandidates {
   const wg = (row.WarenGruppe || "").trim().toLowerCase();
-  const hst = herstellerGlobal.trim().toLowerCase();
+  const nameWords = new Set(getClothName(row).toLowerCase().split(/\s+/).filter(w => w.length >= 3));
 
-  const byWgHst = wg && hst ? catalog.filter(c => c.warengruppe.trim().toLowerCase() === wg && c.hersteller.trim().toLowerCase() === hst) : [];
-  if (byWgHst.length > 0) return { examples: byWgHst.slice(0, 5), matchTier: "warengruppe+hersteller" };
+  const scored = catalog.map(c => {
+    const wgMatch = wg !== "" && c.warengruppe.trim().toLowerCase() === wg;
+    const artWords = c.artikelname.toLowerCase().split(/\s+/).filter(w => w.length >= 3);
+    const overlap = artWords.filter(w => nameWords.has(w)).length;
+    const score = (wgMatch ? 5 : 0) + overlap * 2;
+    return { row: c, score, wgMatch, overlap };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  const top = scored.filter(s => s.score > 0).slice(0, 5);
 
-  const byWg = wg ? catalog.filter(c => c.warengruppe.trim().toLowerCase() === wg) : [];
-  if (byWg.length > 0) return { examples: byWg.slice(0, 5), matchTier: "warengruppe" };
+  let examples: JtlCatalogRow[];
+  let matchTier: MatchTier;
+  if (top.length > 0) {
+    examples = top.map(s => s.row);
+    const best = top[0];
+    matchTier = best.wgMatch && best.overlap > 0 ? "warengruppe+name" : best.wgMatch ? "warengruppe" : "name-similarity";
+  } else {
+    // Nothing scored — still give the model a small style sample instead of
+    // silently skipping the AI call and falling back to the blind formula.
+    examples = catalog.slice(0, 3);
+    matchTier = "generic";
+  }
 
-  const byHst = hst ? catalog.filter(c => c.hersteller.trim().toLowerCase() === hst) : [];
-  if (byHst.length > 0) return { examples: byHst.slice(0, 5), matchTier: "hersteller" };
-
-  return { examples: [], matchTier: "none" };
+  return {
+    examples,
+    matchTier,
+    resolvedHersteller: mostCommon(examples.map(e => e.hersteller)),
+    resolvedLieferant: mostCommon(examples.map(e => e.lieferant)),
+  };
 }
 
 const COLUMNS: { key: keyof ClothRow; label: string; width: string }[] = [
@@ -116,9 +157,9 @@ const Smart = () => {
   const [isImportingOrder, setIsImportingOrder] = useState(false);
 
   // ── Toolbar globals — same defaults/roles as Index.tsx, applied uniformly at export ──
+  // Hersteller/Lieferant are NOT entered manually here — they're resolved per
+  // product from the matched JTL rows (see resolveHersteller/resolveLieferant).
   const [kurzl, setKurzl] = useState("");
-  const [hersteller, setHersteller] = useState("");
-  const [lieferant, setLieferant] = useState("");
   const [auf, setAuf] = useState("2");
   const [ab, setAb] = useState("1");
   const [aufSe, setAufSe] = useState("");
@@ -134,8 +175,12 @@ const Smart = () => {
   const [jtlCatalogFileName, setJtlCatalogFileName] = useState("");
   const [isLoadingCatalog, setIsLoadingCatalog] = useState(false);
 
-  // ── Classification ─────────────────────────────────────────────────────────
+  // ── Classification — WarenGruppe is always classified automatically; the
+  // "Merkmale" checkbox additionally fills MerkmaleGroesse/Art/Farbe from the
+  // same classify-products call. ─────────────────────────────────────────────
   const [isClassifying, setIsClassifying] = useState(false);
+  const [fillMerkmale, setFillMerkmale] = useState(false);
+  const [fillMetaText, setFillMetaText] = useState(false);
 
   // ── AI naming ──────────────────────────────────────────────────────────────
   const [isGeneratingNames, setIsGeneratingNames] = useState(false);
@@ -225,7 +270,11 @@ const Smart = () => {
         return;
       }
 
-      setRows(prev => [...prev, ...built]);
+      const merged = [...rows, ...built];
+      setRows(merged);
+      // WarenGruppe must always be classified via AI — happens right away so
+      // naming/category matching downstream always has it available.
+      ensureWarengruppeClassified(merged);
       const detectedFields = [
         mapping.ItemName, mapping.color, mapping.Size, mapping.EAN, mapping.HAN, mapping.EK,
         mapping.VK, mapping.Menge, mapping.Collection, mapping.Measurement, mapping.InfoMaterial,
@@ -265,59 +314,93 @@ const Smart = () => {
     }
   };
 
-  // ── Step 1: AI classification (same rules/endpoint as Index.tsx) ────────────
-  const handleAIClassify = async () => {
-    const filledRows = rows.filter(r => getClothName(r).trim() !== "");
-    if (filledRows.length === 0) {
-      toast({ title: t("noData", lang), description: t("noDataDesc", lang), variant: "destructive" });
-      return;
+  // ── Classification core (same classify-products endpoint/prompt as Index.tsx) ──
+  // WarenGruppe is always written; MerkmaleFarbe/Art/Groesse are only written
+  // when includeMerkmale is true (gated by the "Merkmale" checkbox). Takes and
+  // returns an explicit rows array (rather than reading the `rows` state) so
+  // callers can chain it immediately after their own setRows without racing
+  // React's async state updates.
+  const classifyRows = async (allRows: ClothRow[], targetIds: Set<string>, includeMerkmale: boolean): Promise<ClothRow[]> => {
+    const targets = allRows.filter(r => targetIds.has(r.id));
+    if (targets.length === 0) return allRows;
+
+    const itemNames = targets.map(r => [getClothName(r), r.color].filter(Boolean).join(" ").trim());
+    const itemSizes = targets.map(r => r.Size || "");
+
+    const { data, error } = await apiFetch("classify-products", { items: itemNames, sizes: itemSizes });
+    if (error) throw error;
+    const anyData = data as any;
+    if (anyData?.error) {
+      if (anyData.error.includes("Rate limit")) {
+        toast({ title: t("rateLimit", lang), description: t("rateLimitDesc", lang), variant: "destructive" });
+      } else if (anyData.error.includes("Payment")) {
+        toast({ title: t("paymentIssue", lang), description: t("paymentIssueDesc", lang), variant: "destructive" });
+      }
+      throw new Error(anyData.error);
     }
+    const classifications = anyData?.classifications;
+    if (!Array.isArray(classifications)) throw new Error("Invalid response");
+
+    let idx = 0;
+    const updated = allRows.map(row => {
+      if (!targetIds.has(row.id)) return row;
+      const c = classifications[idx++];
+      if (!c) return row;
+      return {
+        ...row,
+        WarenGruppe: c.warengruppe || row.WarenGruppe,
+        ...(includeMerkmale ? {
+          MerkmaleFarbe: c.farbe || mapColorToMerkmaleFarbe(row.color, MERKMALE_FARBE_OPTIONS) || row.MerkmaleFarbe || "",
+          MerkmaleArt: c.art || row.MerkmaleArt || "",
+          MerkmaleGroesse: c.groesse || mapSizeToMerkmaleGroesse(row.Size, MERKMALE_GROESSE_MATCH_OPTIONS) || row.MerkmaleGroesse || "",
+        } : {}),
+      };
+    });
+    setRows(updated);
+    return updated;
+  };
+
+  // Mandatory, automatic: WarenGruppe must always be classified before naming
+  // matching can work, so this runs right after import (and defensively again
+  // before "KI-Namen generieren") for whichever rows still lack it.
+  const ensureWarengruppeClassified = async (candidateRows: ClothRow[]): Promise<ClothRow[]> => {
+    const missing = candidateRows.filter(r => getClothName(r).trim() !== "" && !r.WarenGruppe);
+    if (missing.length === 0) return candidateRows;
     setIsClassifying(true);
     try {
-      const itemNames = filledRows.map(r => [getClothName(r), r.color].filter(Boolean).join(" ").trim());
-      const itemSizes = filledRows.map(r => r.Size || "");
+      return await classifyRows(candidateRows, new Set(missing.map(r => r.id)), fillMerkmale);
+    } catch (err) {
+      console.error("auto classification failed:", err);
+      toast({ title: t("classifyError", lang), description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
+      return candidateRows;
+    } finally {
+      setIsClassifying(false);
+    }
+  };
 
-      const { data, error } = await apiFetch("classify-products", { items: itemNames, sizes: itemSizes });
-      if (error) throw error;
-      const anyData = data as any;
-      if (anyData?.error) {
-        if (anyData.error.includes("Rate limit")) {
-          toast({ title: t("rateLimit", lang), description: t("rateLimitDesc", lang), variant: "destructive" });
-        } else if (anyData.error.includes("Payment")) {
-          toast({ title: t("paymentIssue", lang), description: t("paymentIssueDesc", lang), variant: "destructive" });
-        } else {
-          throw new Error(anyData.error);
-        }
-        return;
-      }
-      const classifications = anyData?.classifications;
-      if (!Array.isArray(classifications)) throw new Error("Invalid response");
-
-      setRows(prev => {
-        const next = [...prev];
-        let idx = 0;
-        next.forEach((row, i) => {
-          if (getClothName(row).trim() !== "" && idx < classifications.length) {
-            const c = classifications[idx];
-            next[i] = {
-              ...row,
-              WarenGruppe: c.warengruppe || row.WarenGruppe,
-              MerkmaleFarbe: c.farbe || mapColorToMerkmaleFarbe(row.color, MERKMALE_FARBE_OPTIONS) || row.MerkmaleFarbe || "",
-              MerkmaleArt: c.art || row.MerkmaleArt || "",
-              MerkmaleGroesse: c.groesse || mapSizeToMerkmaleGroesse(row.Size, MERKMALE_GROESSE_MATCH_OPTIONS) || row.MerkmaleGroesse || "",
-            };
-            idx++;
-          }
-        });
-        return next;
-      });
-      toast({ title: t("classifyDone", lang), description: `${classifications.length} ${t("classifyDoneDesc", lang)}` });
+  // "Merkmale" checkbox — reclassifies ALL filled rows so MerkmaleGroesse/Art/
+  // Farbe get backfilled even for rows already carrying a WarenGruppe.
+  const handleFillMerkmaleToggle = async (checked: boolean) => {
+    setFillMerkmale(checked);
+    if (!checked) return;
+    const filledRows = rows.filter(r => getClothName(r).trim() !== "");
+    if (filledRows.length === 0) return;
+    setIsClassifying(true);
+    try {
+      await classifyRows(rows, new Set(filledRows.map(r => r.id)), true);
+      toast({ title: t("classifyDone", lang), description: `${filledRows.length} ${t("classifyDoneDesc", lang)}` });
     } catch (err) {
       console.error("Classification error:", err);
       toast({ title: t("classifyError", lang), description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
     } finally {
       setIsClassifying(false);
     }
+  };
+
+  // "Meta-Text" checkbox — triggers the existing text-generation flow.
+  const handleFillMetaTextToggle = (checked: boolean) => {
+    setFillMetaText(checked);
+    if (checked) handleGenerateTexts();
   };
 
   // ── Step 2: AI naming — match similar JTL rows, generate, confirm ───────────
@@ -336,51 +419,38 @@ const Smart = () => {
       return;
     }
 
+    // Defensive re-check: guarantees WarenGruppe is present for matching even
+    // if the automatic post-import classification hasn't finished/failed.
+    const freshRows = await ensureWarengruppeClassified(rows);
+    const freshFilledRows = freshRows.filter(r => getClothName(r).trim() !== "");
+
     const groups: Record<string, ClothRow[]> = {};
-    filledRows.forEach(r => {
+    freshFilledRows.forEach(r => {
       const key = `${safe(getClothName(r))}|${safe(r.color)}`;
       if (!groups[key]) groups[key] = [];
       groups[key].push(r);
     });
     const groupEntries = Object.entries(groups);
 
-    const candidatesByKey: Record<string, { examples: JtlCatalogRow[]; matchTier: MatchTier }> = {};
+    const candidatesByKey: Record<string, NamingCandidates> = {};
     groupEntries.forEach(([key, groupRows]) => {
-      candidatesByKey[key] = buildNamingCandidates(groupRows[0], jtlCatalogRows, hersteller);
+      candidatesByKey[key] = buildNamingCandidates(groupRows[0], jtlCatalogRows);
     });
-
-    const toQuery = groupEntries.filter(([key]) => candidatesByKey[key].matchTier !== "none");
-    const noMatch = groupEntries.filter(([key]) => candidatesByKey[key].matchTier === "none");
 
     setIsGeneratingNames(true);
     try {
       const previewRows: AIIdentifierPreviewRow[] = [];
 
-      noMatch.forEach(([key, groupRows]) => {
-        const r0 = groupRows[0];
-        const [name, color] = key.split("|");
-        const wg = r0.WarenGruppe || "";
-        previewRows.push({
-          id: key,
-          originalName: name, color, size: r0.Size || "", warengruppe: wg, hersteller,
-          suggestedArtikelnummer: artikelnummerBuilder(kurzl, getClothName(r0), color, "", wg, seasonalCode),
-          suggestedArtikelname: toProperCase(getClothName(r0)),
-          suggestedHan: r0.HAN || "",
-          matchTier: "none",
-          exampleArtikelnummern: [],
-        });
-      });
-
       const CHUNK = 20;
-      for (let i = 0; i < toQuery.length; i += CHUNK) {
-        const chunk = toQuery.slice(i, i + CHUNK);
+      for (let i = 0; i < groupEntries.length; i += CHUNK) {
+        const chunk = groupEntries.slice(i, i + CHUNK);
         const items = chunk.map(([key, groupRows]) => {
           const r0 = groupRows[0];
           const cand = candidatesByKey[key];
           return {
             id: key,
             itemName: r0.ItemName, collection: r0.Collection, measurement: r0.Measurement, infoMaterial: r0.InfoMaterial,
-            color: r0.color, size: r0.Size, warengruppe: r0.WarenGruppe, hersteller,
+            color: r0.color, size: r0.Size, warengruppe: r0.WarenGruppe, hersteller: cand.resolvedHersteller,
             examples: cand.examples.map(e => ({ artikelnummer: e.artikelnummer, artikelname: e.artikelname, han: e.han })),
             matchTier: cand.matchTier,
           };
@@ -400,10 +470,12 @@ const Smart = () => {
           const result = results.find(r => r.id === key) || results[idx];
           previewRows.push({
             id: key,
-            originalName: name, color, size: r0.Size || "", warengruppe: wg, hersteller,
+            originalName: name, color, size: r0.Size || "", warengruppe: wg, hersteller: cand.resolvedHersteller,
             suggestedArtikelnummer: result?.artikelnummer || artikelnummerBuilder(kurzl, getClothName(r0), color, "", wg, seasonalCode),
             suggestedArtikelname: result?.artikelname || toProperCase(getClothName(r0)),
             suggestedHan: result?.han || r0.HAN || "",
+            suggestedHersteller: cand.resolvedHersteller,
+            suggestedLieferant: cand.resolvedLieferant,
             matchTier: cand.matchTier,
             exampleArtikelnummern: cand.examples.map(e => e.artikelnummer),
           });
@@ -462,6 +534,22 @@ const Smart = () => {
   const resolveHan = (row: ClothRow, color: string): string => {
     const key = `${safe(getClothName(row))}|${safe(color)}`;
     return namingSuggestions[key]?.suggestedHan?.trim() || safe(row.HAN) || "";
+  };
+  // Hersteller/Lieferant are never typed manually — a confirmed naming
+  // suggestion wins if the user edited it, otherwise these are computed live
+  // from whichever JTL rows match this product, so they're always available
+  // as soon as a JTL export is loaded (no need to run/confirm naming first).
+  const resolveHersteller = (row: ClothRow, color: string): string => {
+    const key = `${safe(getClothName(row))}|${safe(color)}`;
+    const confirmed = namingSuggestions[key]?.suggestedHersteller?.trim();
+    if (confirmed) return confirmed;
+    return jtlCatalogRows.length ? buildNamingCandidates(row, jtlCatalogRows).resolvedHersteller : "";
+  };
+  const resolveLieferant = (row: ClothRow, color: string): string => {
+    const key = `${safe(getClothName(row))}|${safe(color)}`;
+    const confirmed = namingSuggestions[key]?.suggestedLieferant?.trim();
+    if (confirmed) return confirmed;
+    return jtlCatalogRows.length ? buildNamingCandidates(row, jtlCatalogRows).resolvedLieferant : "";
   };
 
   // ── Step 3: Category mapping (same rules/endpoint as Index.tsx) ─────────────
@@ -561,7 +649,7 @@ const Smart = () => {
             artikelnummer: artnr,
             artikelname: name,
             farbe: first.color || "",
-            hersteller: hersteller.trim(),
+            hersteller: resolveHersteller(first, first.color || "").trim(),
             warengruppe: wg,
             art: first.MerkmaleArt || "",
             beschreibung: first.Description || "",
@@ -685,7 +773,7 @@ const Smart = () => {
       allItems.push({
         artikelname: toProperCase(_name),
         han: safe(r.HAN),
-        markenname: hersteller.trim(),
+        markenname: resolveHersteller(r, r.color || "").trim(),
         beschreibung: safe(r.Description),
         warengruppe: safe(r.WarenGruppe),
         art: safe(r.MerkmaleArt),
@@ -841,6 +929,8 @@ const Smart = () => {
       const parentFarbe = unionMulti("MerkmaleFarbe");
 
       const tx = confirmedTexts[name] || { produkttext: "", Title_Tag: "", html_de: "", meta_description: "", suchbegriffe: "" };
+      const herstellerForGroup = resolveHersteller(groupRows[0], color);
+      const lieferantForGroup = resolveLieferant(groupRows[0], color);
 
       if (hasParent) {
         const firstRowWarengruppe = groupRows[0]?.WarenGruppe || "";
@@ -851,8 +941,8 @@ const Smart = () => {
         const minEK = eks.length ? eks.reduce((a, b) => a.num <= b.num ? a : b).raw : "";
         const minVK = vks.length ? vks.reduce((a, b) => a.num <= b.num ? a : b).raw : "";
         outputRows.push(buildRow(
-          vaterArtikelnummer, "", exportName, "", color, "", "Vater", applyDiscount(minEK), minVK, hersteller,
-          AufAB, AufAuf, AufSe, Lieferstatus, LieferzeitVal, "", lieferant, firstRowWarengruppe, exportName,
+          vaterArtikelnummer, "", exportName, "", color, "", "Vater", applyDiscount(minEK), minVK, herstellerForGroup,
+          AufAB, AufAuf, AufSe, Lieferstatus, LieferzeitVal, "", lieferantForGroup, firstRowWarengruppe, exportName,
           parentGroesse, parentArt, parentFarbe, "",
           tx.produkttext, tx.Title_Tag, tx.html_de, tx.meta_description, tx.suchbegriffe
         ));
@@ -875,8 +965,8 @@ const Smart = () => {
           hanVal,
           applyDiscount(r.EK),
           r.VK,
-          hersteller,
-          AufAB, AufAuf, AufSe, Lieferstatus, LieferzeitVal, r.Menge, lieferant,
+          herstellerForGroup,
+          AufAB, AufAuf, AufSe, Lieferstatus, LieferzeitVal, r.Menge, lieferantForGroup,
           r.WarenGruppe || "",
           exportName,
           rowGroesse, rowArt, rowFarbe,
@@ -967,6 +1057,12 @@ const Smart = () => {
 
           <div className="h-5 w-px bg-border mx-1" />
           <span className="text-xs text-muted-foreground">{filledCount} {lang === "DE" ? "Produkte" : "products"}</span>
+          {isClassifying && (
+            <span className="text-xs text-muted-foreground flex items-center gap-1">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              {lang === "DE" ? "Warengruppe wird klassifiziert..." : "Classifying category..."}
+            </span>
+          )}
           <Button variant="ghost" size="sm" className="gap-1.5 text-destructive" onClick={clearAll}>
             <Trash2 className="h-4 w-4" />
             {lang === "DE" ? "Daten leeren" : "Clear data"}
@@ -978,14 +1074,6 @@ const Smart = () => {
           <div className="flex flex-col gap-1">
             <Label className="text-xs">{t("kurzl", lang)}</Label>
             <Input value={kurzl} onChange={e => setKurzl(e.target.value)} className="h-8 w-28 text-xs" />
-          </div>
-          <div className="flex flex-col gap-1">
-            <Label className="text-xs">{t("hersteller", lang)}</Label>
-            <Input value={hersteller} onChange={e => setHersteller(e.target.value)} className="h-8 w-36 text-xs" />
-          </div>
-          <div className="flex flex-col gap-1">
-            <Label className="text-xs">{t("lieferant", lang)}</Label>
-            <Input value={lieferant} onChange={e => setLieferant(e.target.value)} className="h-8 w-36 text-xs" />
           </div>
           <div className="flex flex-col gap-1">
             <Label className="text-xs">{t("auf", lang)}</Label>
@@ -1028,10 +1116,6 @@ const Smart = () => {
 
         {/* ── Pipeline actions ───────────────────────────────────────────── */}
         <div className="bg-card border border-border rounded-lg px-4 py-3 mb-4 flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={handleAIClassify} disabled={isClassifying || filledCount === 0}>
-            {isClassifying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-            {t("aiClassify", lang)}
-          </Button>
           <Button variant="outline" size="sm" className="gap-1.5" onClick={handleGenerateNames} disabled={isGeneratingNames || filledCount === 0 || jtlCatalogRows.length === 0}>
             {isGeneratingNames ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
             {lang === "DE" ? "KI-Namen generieren" : "Generate AI naming"}
@@ -1045,10 +1129,16 @@ const Smart = () => {
             {isMapping ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderTree className="h-4 w-4" />}
             {lang === "DE" ? "Kategorien" : "Categories"}
           </Button>
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={handleGenerateTexts} disabled={isGeneratingTexts || filledCount === 0}>
-            {isGeneratingTexts ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-            {lang === "DE" ? "Texte" : "Texts"}
-          </Button>
+          <div className="h-5 w-px bg-border mx-1" />
+          <div className="flex items-center gap-1.5">
+            <Checkbox id="fillMerkmale" checked={fillMerkmale} onCheckedChange={v => handleFillMerkmaleToggle(v === true)} disabled={isClassifying || filledCount === 0} />
+            <Label htmlFor="fillMerkmale" className="text-xs">{lang === "DE" ? "Merkmale" : "Attributes"}</Label>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Checkbox id="fillMetaText" checked={fillMetaText} onCheckedChange={v => handleFillMetaTextToggle(v === true)} disabled={isGeneratingTexts || filledCount === 0} />
+            <Label htmlFor="fillMetaText" className="text-xs">{lang === "DE" ? "Meta-Text" : "Meta text"}</Label>
+          </div>
+          {isGeneratingTexts && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
           <div className="flex-1" />
           <Button size="sm" className="gap-1.5" onClick={processAndDownload} disabled={filledCount === 0}>
             <Download className="h-4 w-4" />
