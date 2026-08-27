@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Upload, Download, Sparkles, FolderTree, Loader2, Database, Trash2, Plus } from "lucide-react";
+import { ArrowLeft, Upload, Download, Sparkles, FolderTree, Loader2, Database, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { type Lang, t } from "@/lib/translations";
 import { TextPreviewModal, type TextPreviewRow } from "@/components/TextPreviewModal";
@@ -43,6 +43,14 @@ const createEmptyRow = (): ClothRow => ({
   WarenGruppe: "", color: "", Size: "", EAN: "", HAN: "", EK: "", VK: "", Menge: "",
   Description: "", MerkmaleGroesse: "", MerkmaleFarbe: "", MerkmaleArt: "",
 });
+
+// Like getClothName, but excludes InfoMaterial — used ONLY for the naming
+// fallback/matching, never for grouping. Supplier order files often dump raw
+// fibre-composition text ("80% Wool, 17% Polyamide, 3% Elastane") into
+// InfoMaterial via the AI column-mapping step, and that text must never end
+// up baked into a customer-facing Artikelnummer/Artikelname.
+const getBaseNameForNaming = (row: ClothRow): string =>
+  [row.Collection, row.ItemName, row.Measurement].map(s => s?.trim() || "").filter(Boolean).join(" ");
 
 const WARENGRUPPE_OPTIONS = [
   "Accessoires", "Care", "Deko", "Dienstleistungen", "Essen/Trinken", "Fahren", "Fahrräder",
@@ -96,7 +104,7 @@ function mostCommon(values: string[]): string {
 // whichever JTL rows end up matched.
 function buildNamingCandidates(row: ClothRow, catalog: JtlCatalogRow[]): NamingCandidates {
   const wg = (row.WarenGruppe || "").trim().toLowerCase();
-  const nameWords = new Set(getClothName(row).toLowerCase().split(/\s+/).filter(w => w.length >= 3));
+  const nameWords = new Set(getBaseNameForNaming(row).toLowerCase().split(/\s+/).filter(w => w.length >= 3));
 
   const scored = catalog.map(c => {
     const wgMatch = wg !== "" && c.warengruppe.trim().toLowerCase() === wg;
@@ -128,25 +136,6 @@ function buildNamingCandidates(row: ClothRow, catalog: JtlCatalogRow[]): NamingC
     resolvedLieferant: mostCommon(examples.map(e => e.lieferant)),
   };
 }
-
-const COLUMNS: { key: keyof ClothRow; label: string; width: string }[] = [
-  { key: "Collection", label: "Kollektion", width: "110px" },
-  { key: "ItemName", label: "Name", width: "160px" },
-  { key: "Measurement", label: "Maß", width: "80px" },
-  { key: "InfoMaterial", label: "Info/Material", width: "110px" },
-  { key: "WarenGruppe", label: "WarenGruppe", width: "140px" },
-  { key: "color", label: "Farbe", width: "100px" },
-  { key: "Size", label: "Größe", width: "70px" },
-  { key: "EAN", label: "EAN", width: "120px" },
-  { key: "HAN", label: "HAN", width: "100px" },
-  { key: "EK", label: "EK", width: "70px" },
-  { key: "VK", label: "VK", width: "70px" },
-  { key: "Menge", label: "Menge", width: "70px" },
-  { key: "MerkmaleGroesse", label: "M. Größe", width: "120px" },
-  { key: "MerkmaleArt", label: "M. Art", width: "120px" },
-  { key: "MerkmaleFarbe", label: "M. Farbe", width: "100px" },
-  { key: "Description", label: "Beschreibung", width: "180px" },
-];
 
 const Smart = () => {
   const { toast } = useToast();
@@ -204,11 +193,6 @@ const Smart = () => {
   const filledCount = useMemo(() => rows.filter(r => getClothName(r).trim() !== "").length, [rows]);
 
   // ── Row editing ────────────────────────────────────────────────────────────
-  const handleCellChange = (id: string, field: keyof ClothRow, value: string) => {
-    setRows(prev => prev.map(r => (r.id === id ? { ...r, [field]: value } : r)));
-  };
-  const addRow = () => setRows(prev => [...prev, createEmptyRow()]);
-  const deleteRow = (id: string) => setRows(prev => prev.filter(r => r.id !== id));
   const clearAll = () => {
     setRows([]);
     setJtlCatalogRows([]);
@@ -438,59 +422,95 @@ const Smart = () => {
     });
 
     setIsGeneratingNames(true);
+    const previewRows: AIIdentifierPreviewRow[] = [];
+    let failedChunks = 0;
     try {
-      const previewRows: AIIdentifierPreviewRow[] = [];
-
-      const CHUNK = 20;
+      // Smaller chunks + a per-chunk try/catch: a single malformed/oversized
+      // response used to throw out of the whole function, leaving
+      // namingSuggestions completely empty and silently falling back to the
+      // raw formula for EVERY product on export. Now one bad chunk only
+      // affects its own items — everything else still gets real AI naming,
+      // and the failed items still show up in the preview (formula-based,
+      // clearly flagged) instead of vanishing.
+      const CHUNK = 10;
       for (let i = 0; i < groupEntries.length; i += CHUNK) {
         const chunk = groupEntries.slice(i, i + CHUNK);
-        const items = chunk.map(([key, groupRows]) => {
-          const r0 = groupRows[0];
-          const cand = candidatesByKey[key];
-          return {
-            id: key,
-            itemName: r0.ItemName, collection: r0.Collection, measurement: r0.Measurement, infoMaterial: r0.InfoMaterial,
-            color: r0.color, size: r0.Size, warengruppe: r0.WarenGruppe, hersteller: cand.resolvedHersteller,
-            examples: cand.examples.map(e => ({ artikelnummer: e.artikelnummer, artikelname: e.artikelname, han: e.han })),
-            matchTier: cand.matchTier,
-          };
-        });
-
-        const { data, error } = await apiFetch("generate-naming", { items });
-        if (error) throw error;
-        const anyData = data as any;
-        if (anyData?.error) throw new Error(anyData.error);
-        const results: { id: string; artikelnummer: string; artikelname: string; han: string; confidence: string }[] = anyData?.results || [];
-
-        chunk.forEach(([key, groupRows], idx) => {
-          const r0 = groupRows[0];
-          const [name, color] = key.split("|");
-          const cand = candidatesByKey[key];
-          const wg = r0.WarenGruppe || "";
-          const result = results.find(r => r.id === key) || results[idx];
-          previewRows.push({
-            id: key,
-            originalName: name, color, size: r0.Size || "", warengruppe: wg, hersteller: cand.resolvedHersteller,
-            suggestedArtikelnummer: result?.artikelnummer || artikelnummerBuilder(kurzl, getClothName(r0), color, "", wg, seasonalCode),
-            suggestedArtikelname: result?.artikelname || toProperCase(getClothName(r0)),
-            suggestedHan: result?.han || r0.HAN || "",
-            suggestedHersteller: cand.resolvedHersteller,
-            suggestedLieferant: cand.resolvedLieferant,
-            matchTier: cand.matchTier,
-            exampleArtikelnummern: cand.examples.map(e => e.artikelnummer),
+        const pushFallback = () => {
+          chunk.forEach(([key, groupRows]) => {
+            const r0 = groupRows[0];
+            const [name, color] = key.split("|");
+            const cand = candidatesByKey[key];
+            const wg = r0.WarenGruppe || "";
+            previewRows.push({
+              id: key,
+              originalName: name, color, size: r0.Size || "", warengruppe: wg, hersteller: cand.resolvedHersteller,
+              suggestedArtikelnummer: artikelnummerBuilder(kurzl, getBaseNameForNaming(r0), color, "", wg, seasonalCode),
+              suggestedArtikelname: toProperCase(getBaseNameForNaming(r0)),
+              suggestedHan: r0.HAN || "",
+              suggestedHersteller: cand.resolvedHersteller,
+              suggestedLieferant: cand.resolvedLieferant,
+              matchTier: cand.matchTier,
+              exampleArtikelnummern: cand.examples.map(e => e.artikelnummer),
+            });
           });
-        });
+        };
+
+        try {
+          const items = chunk.map(([key, groupRows]) => {
+            const r0 = groupRows[0];
+            const cand = candidatesByKey[key];
+            return {
+              id: key,
+              itemName: r0.ItemName, collection: r0.Collection, measurement: r0.Measurement, infoMaterial: r0.InfoMaterial,
+              color: r0.color, size: r0.Size, warengruppe: r0.WarenGruppe, hersteller: cand.resolvedHersteller,
+              examples: cand.examples.map(e => ({ artikelnummer: e.artikelnummer, artikelname: e.artikelname, han: e.han })),
+              matchTier: cand.matchTier,
+            };
+          });
+
+          const { data, error } = await apiFetch("generate-naming", { items });
+          if (error) throw error;
+          const anyData = data as any;
+          if (anyData?.error) throw new Error(anyData.error);
+          const results: { id: string; artikelnummer: string; artikelname: string; han: string; confidence: string }[] = anyData?.results || [];
+          if (!Array.isArray(results) || results.length === 0) throw new Error("empty results");
+
+          chunk.forEach(([key, groupRows], idx) => {
+            const r0 = groupRows[0];
+            const [name, color] = key.split("|");
+            const cand = candidatesByKey[key];
+            const wg = r0.WarenGruppe || "";
+            const result = results.find(r => r.id === key) || results[idx];
+            previewRows.push({
+              id: key,
+              originalName: name, color, size: r0.Size || "", warengruppe: wg, hersteller: cand.resolvedHersteller,
+              suggestedArtikelnummer: result?.artikelnummer || artikelnummerBuilder(kurzl, getBaseNameForNaming(r0), color, "", wg, seasonalCode),
+              suggestedArtikelname: result?.artikelname || toProperCase(getBaseNameForNaming(r0)),
+              suggestedHan: result?.han || r0.HAN || "",
+              suggestedHersteller: cand.resolvedHersteller,
+              suggestedLieferant: cand.resolvedLieferant,
+              matchTier: cand.matchTier,
+              exampleArtikelnummern: cand.examples.map(e => e.artikelnummer),
+            });
+          });
+        } catch (chunkErr) {
+          console.error("generate-naming chunk failed, using fallback for this batch:", chunkErr);
+          failedChunks++;
+          pushFallback();
+        }
       }
 
       setNamingPreviewRows(previewRows);
       setNamingPreviewOpen(true);
-    } catch (err) {
-      console.error("generate-naming failed:", err);
-      toast({
-        title: lang === "DE" ? "Namensgenerierung fehlgeschlagen" : "Naming generation failed",
-        description: err instanceof Error ? err.message : String(err),
-        variant: "destructive",
-      });
+      if (failedChunks > 0) {
+        toast({
+          title: lang === "DE" ? "Teilweise fehlgeschlagen" : "Partially failed",
+          description: lang === "DE"
+            ? `${failedChunks} von ${Math.ceil(groupEntries.length / 10)} KI-Anfragen fehlgeschlagen — betroffene Produkte verwenden die Formel, bitte prüfen.`
+            : `${failedChunks} of ${Math.ceil(groupEntries.length / 10)} AI requests failed — affected products use the formula, please review.`,
+          variant: "destructive",
+        });
+      }
     } finally {
       setIsGeneratingNames(false);
     }
@@ -515,7 +535,7 @@ const Smart = () => {
     const suggestion = namingSuggestions[key];
     const wg = row.WarenGruppe || "";
     return suggestion?.suggestedArtikelnummer?.trim()
-      || artikelnummerBuilder(kurzl, getClothName(row), color, "", wg, seasonalCode);
+      || artikelnummerBuilder(kurzl, getBaseNameForNaming(row), color, "", wg, seasonalCode);
   };
   const resolveSku = (row: ClothRow, color: string, size: string): string => {
     const key = `${safe(getClothName(row))}|${safe(color)}`;
@@ -525,11 +545,11 @@ const Smart = () => {
       return size ? `${base} ${stripForbiddenChars(size).toUpperCase()}` : base;
     }
     const wg = row.WarenGruppe || "";
-    return artikelnummerBuilder(kurzl, getClothName(row), color, size, wg, seasonalCode);
+    return artikelnummerBuilder(kurzl, getBaseNameForNaming(row), color, size, wg, seasonalCode);
   };
   const resolveArtikelname = (row: ClothRow, color: string): string => {
     const key = `${safe(getClothName(row))}|${safe(color)}`;
-    return namingSuggestions[key]?.suggestedArtikelname?.trim() || getClothName(row);
+    return namingSuggestions[key]?.suggestedArtikelname?.trim() || getBaseNameForNaming(row);
   };
   const resolveHan = (row: ClothRow, color: string): string => {
     const key = `${safe(getClothName(row))}|${safe(color)}`;
@@ -885,7 +905,10 @@ const Smart = () => {
   };
 
   // ── Step 5: Final GESAMT export ───────────────────────────────────────────────
-  const processAndDownload = () => {
+  // Pure computation of the exact GESAMT CSV rows — used both by the live
+  // preview table and by the actual download, so what's shown is always
+  // exactly what gets exported (never a preview of the raw uploaded file).
+  const computeOutputRows = (): Record<string, string | number>[] => {
     const AufAB = parseInt(ab) || 1;
     const AufAuf = parseInt(auf) || 2;
     const AufSe = aufSe;
@@ -976,6 +999,36 @@ const Smart = () => {
       });
     });
 
+    return outputRows;
+  };
+
+  // Live preview of the exact GESAMT rows — recomputed whenever anything that
+  // feeds the export changes (rows, naming/category/text confirmations, or
+  // the toolbar globals).
+  const gesamtPreviewRows = useMemo(
+    () => computeOutputRows(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rows, vaterstat, confirmedTexts, namingSuggestions, jtlCatalogRows, kurzl, ab, auf, aufSe, seasonalCode, verfuegbarkeit, lieferzeit, ekDiscount]
+  );
+
+  const processAndDownload = () => {
+    // Never silently export the raw formula fallback for products that were
+    // simply never run through "KI-Namen generieren" (or confirmed) — that's
+    // exactly how a whole export can end up with no Hersteller/Lieferant and
+    // a garbled Artikelnummer without anyone noticing until after the fact.
+    const filledRows = rows.filter(r => getClothName(r).trim() !== "");
+    const groupKeys = new Set(filledRows.map(r => `${safe(getClothName(r))}|${safe(r.color)}`));
+    const unconfirmed = [...groupKeys].filter(k => !namingSuggestions[k]);
+    if (unconfirmed.length > 0) {
+      const proceed = window.confirm(
+        lang === "DE"
+          ? `${unconfirmed.length} von ${groupKeys.size} Produkten haben keine bestätigten KI-Namen — für diese wird die einfache Formel (ohne Hersteller/Lieferant) verwendet. Trotzdem exportieren?`
+          : `${unconfirmed.length} of ${groupKeys.size} products have no confirmed AI naming — they'll use the plain formula (no Hersteller/Lieferant). Export anyway?`
+      );
+      if (!proceed) return;
+    }
+
+    const outputRows = computeOutputRows();
     if (outputRows.length === 0) {
       toast({ title: t("noData", lang), description: t("noDataDesc", lang), variant: "destructive" });
       return;
@@ -1146,51 +1199,51 @@ const Smart = () => {
           </Button>
         </div>
 
-        {/* ── Grid ───────────────────────────────────────────────────────── */}
+        {/* ── GESAMT preview — exactly what "CSV exportieren" downloads, ──────
+            recomputed live, never the raw uploaded/imported columns. ────── */}
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-sm font-medium">
+            {lang === "DE" ? "GESAMT-Vorschau" : "GESAMT preview"}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            {gesamtPreviewRows.length} {lang === "DE" ? "Export-Zeilen" : "export rows"}
+          </span>
+        </div>
         <div className="border border-border rounded-lg overflow-auto max-h-[55vh]">
           <table className="text-xs border-collapse w-max min-w-full">
             <thead className="bg-muted sticky top-0 z-10">
               <tr>
                 <th className="border px-2 py-1 text-left font-medium w-8">#</th>
-                {COLUMNS.map(col => (
-                  <th key={col.key} className="border px-2 py-1 text-left font-medium whitespace-nowrap" style={{ width: col.width }}>{col.label}</th>
+                {gesamtPreviewRows[0] && Object.keys(gesamtPreviewRows[0]).map(col => (
+                  <th key={col} className="border px-2 py-1 text-left font-medium whitespace-nowrap" style={{ width: 150 }}>{col}</th>
                 ))}
-                <th className="border px-2 py-1 w-8" />
               </tr>
             </thead>
             <tbody>
-              {rows.map((row, i) => (
-                <tr key={row.id} className={i % 2 === 0 ? "bg-background" : "bg-muted/20"}>
+              {gesamtPreviewRows.map((row, i) => (
+                <tr key={i} className={i % 2 === 0 ? "bg-background" : "bg-muted/20"}>
                   <td className="border px-2 py-1 text-center text-muted-foreground">{i + 1}</td>
-                  {COLUMNS.map(col => (
-                    <td key={col.key} className="border p-0" style={{ width: col.width }}>
-                      <input
-                        className="w-full h-7 px-2 bg-transparent border-none outline-none focus:ring-2 focus:ring-primary/50 text-xs"
-                        value={(row[col.key] as string) || ""}
-                        onChange={e => handleCellChange(row.id, col.key, e.target.value)}
-                      />
+                  {Object.keys(row).map(col => (
+                    <td
+                      key={col}
+                      className="border px-2 py-1 truncate"
+                      style={{ width: 150, maxWidth: 150 }}
+                      title={String(row[col] ?? "")}
+                    >
+                      {row[col]}
                     </td>
                   ))}
-                  <td className="border px-1 text-center">
-                    <button onClick={() => deleteRow(row.id)} className="text-muted-foreground hover:text-destructive" title={lang === "DE" ? "Zeile löschen" : "Delete row"}>×</button>
-                  </td>
                 </tr>
               ))}
-              {rows.length === 0 && (
+              {gesamtPreviewRows.length === 0 && (
                 <tr>
-                  <td colSpan={COLUMNS.length + 2} className="border px-4 py-8 text-center text-muted-foreground">
+                  <td colSpan={2} className="border px-4 py-8 text-center text-muted-foreground">
                     {lang === "DE" ? "Noch keine Bestellung importiert." : "No order imported yet."}
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
-        </div>
-        <div className="mt-2">
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={addRow}>
-            <Plus className="h-3.5 w-3.5" />
-            {lang === "DE" ? "Zeile hinzufügen" : "Add row"}
-          </Button>
         </div>
       </div>
 

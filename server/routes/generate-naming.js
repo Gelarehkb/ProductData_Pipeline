@@ -22,7 +22,9 @@ Für JEDES neue Produkt bekommst du mehrere echte, bereits im Shop existierende 
 
 PFLICHT: Leite aus den Beispielen das TATSÄCHLICHE Namensschema ab, das dort sichtbar ist — Präfixe/Kürzel, Groß-/Kleinschreibung, Trennzeichen (Leerzeichen, Bindestrich, Unterstrich), Reihenfolge der Bestandteile, ob und wie Größe/Farbe in die Artikelnummer einfließen. Kopiere dieses Muster SO GENAU WIE MÖGLICH auf das neue Produkt — erfinde kein eigenes Schema. Bei matchTier "generic" gibt es keine exakte Vorlage: wende trotzdem den allgemeinen Stil (Groß-/Kleinschreibung, typische Kürzel-Länge, Trennzeichen) an, den du aus den Beispielen erkennst, statt komplett neu zu erfinden. Du MUSST für jedes Produkt eine artikelnummer und einen artikelname zurückgeben — niemals leer lassen.
 
-"han" nur befüllen, wenn aus den Beispielen ein klares Formatierungsmuster erkennbar ist (z.B. Padding, Präfix) — HAN ist ein echter Lieferantencode, keine Erfindung. Wenn unklar: leerer String zurückgeben, dann bleibt der vom Nutzer eingegebene HAN-Wert unverändert.
+VERBOTEN: den rohen Eingabe-Namen (Feld "Name") oder das Feld "Info/Material" unverändert oder nahezu unverändert in artikelnummer/artikelname zu übernehmen. Lieferantendaten sind oft unsauber — sie können interne Statuslabels enthalten (z.B. "Noos", "Ongoing Fashion", "NEW", "Carry-over") und die vollständige Materialzusammensetzung in Prozent (z.B. "80% Wool, 17% Polyamide, 3% Elastane"). Diese Statuslabels und Prozentangaben dürfen NIEMALS in artikelnummer oder artikelname erscheinen, außer sie kommen exakt so in einem Referenzartikel vor. artikelname MUSS wie die Referenzartikel aussehen: kurz, ohne Prozent-/Zahlen-Zusammensetzung, ohne Statuslabels — nicht wie das rohe Eingabefeld.
+
+"han" nur befüllen, wenn aus den Beispielen ein klares Formatierungsmuster erkennbar ist (z.B. Padding, Präfix) — HAN ist ein echter Lieferantencode, keine Erfindung. Wenn unklar: leerer String zurückgeben, dann bleibt der vom Nutzer eingegebene HAN-Wert unverändert. Übernimm NIE einfach eine rohe Stilnummer aus dem Eingabefeld als HAN, wenn sie nicht dem in den Beispielen sichtbaren HAN-Muster entspricht (Beispiele zeigen oft ein zusammengesetztes Format wie "Präfix-Stilnummer-0-Farbcode" — eine nackte Zahl wie "33031" ist meist NUR die Stilnummer, nicht der vollständige HAN).
 
 Neue Produkte (${items.length} Stück):
 ${items.map((it, i) => `${i + 1}. id="${it.id}" | Name: "${it.itemName || ''}" ${it.collection ? `| Kollektion: "${it.collection}" ` : ''}${it.measurement ? `| Maß: "${it.measurement}" ` : ''}${it.infoMaterial ? `| Info/Material: "${it.infoMaterial}" ` : ''}| Farbe: "${it.color || ''}" | Größe: "${it.size || ''}" | Warengruppe: "${it.warengruppe || ''}" | Hersteller: "${it.hersteller || ''}" | matchTier: "${it.matchTier || 'generic'}"
@@ -39,6 +41,7 @@ Antworte NUR mit JSON ohne Markdown, exakt ${items.length} Einträge in derselbe
         messages: [{ role: 'user', content: prompt }],
         response_format: { type: 'json_object' },
         temperature: 0,
+        max_tokens: 4096,
       }),
     });
 
