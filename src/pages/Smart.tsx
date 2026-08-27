@@ -106,12 +106,19 @@ function buildNamingCandidates(row: ClothRow, catalog: JtlCatalogRow[]): NamingC
   const wg = (row.WarenGruppe || "").trim().toLowerCase();
   const nameWords = new Set(getBaseNameForNaming(row).toLowerCase().split(/\s+/).filter(w => w.length >= 3));
 
+  // AI classification can land one bucket off (e.g. "Kleidung Mode" vs.
+  // "Kleidung Basics" for the same wool tights) — a same-first-word match
+  // ("Kleidung ...") still counts for something so a slightly-wrong
+  // Warengruppe doesn't throw away every relevant example.
+  const wgFirstWord = wg.split(/\s+/)[0] || "";
   const scored = catalog.map(c => {
-    const wgMatch = wg !== "" && c.warengruppe.trim().toLowerCase() === wg;
+    const cWg = c.warengruppe.trim().toLowerCase();
+    const wgMatch = wg !== "" && cWg === wg;
+    const wgBroadMatch = !wgMatch && wgFirstWord !== "" && cWg.split(/\s+/)[0] === wgFirstWord;
     const artWords = c.artikelname.toLowerCase().split(/\s+/).filter(w => w.length >= 3);
     const overlap = artWords.filter(w => nameWords.has(w)).length;
-    const score = (wgMatch ? 5 : 0) + overlap * 2;
-    return { row: c, score, wgMatch, overlap };
+    const score = (wgMatch ? 5 : wgBroadMatch ? 2 : 0) + overlap * 2;
+    return { row: c, score, wgMatch, wgBroadMatch, overlap };
   });
   scored.sort((a, b) => b.score - a.score);
   const top = scored.filter(s => s.score > 0).slice(0, 5);
@@ -121,7 +128,9 @@ function buildNamingCandidates(row: ClothRow, catalog: JtlCatalogRow[]): NamingC
   if (top.length > 0) {
     examples = top.map(s => s.row);
     const best = top[0];
-    matchTier = best.wgMatch && best.overlap > 0 ? "warengruppe+name" : best.wgMatch ? "warengruppe" : "name-similarity";
+    matchTier = best.wgMatch && best.overlap > 0 ? "warengruppe+name"
+      : best.wgMatch || best.wgBroadMatch ? "warengruppe"
+      : "name-similarity";
   } else {
     // Nothing scored — still give the model a small style sample instead of
     // silently skipping the AI call and falling back to the blind formula.

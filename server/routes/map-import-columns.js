@@ -21,15 +21,15 @@ router.post('/', async (req, res) => {
     const prompt = `Du ordnest die Spalten einer hochgeladenen Bestelldatei (Excel/CSV eines Lieferanten) automatisch den Zielfeldern eines Produktimports zu, ohne dass der Nutzer manuell zuordnen muss.
 
 Zielfelder und ihre Bedeutung:
-- ItemName: Produktname / Artikelbezeichnung
+- ItemName: Der tatsächliche, beschreibende Produktname (z.B. "Crawling Tights", "Non-Slip Socks", "Grip Gloves") — MUSS aus echten Wörtern bestehen, die beschreiben, WAS das Produkt ist. Eine Spalte, die nur aus Zahlen oder kurzen alphanumerischen Codes besteht (z.B. "33031", "80502"), ist KEIN Produktname — das ist eine Stil-/Referenznummer und gehört zu HAN, nicht zu ItemName. Wenn keine Spalte einen echten beschreibenden Produktnamen enthält, wähle die am ehesten passende Textspalte oder setze null — erfinde nichts.
 - color: Farbe
 - Size: Größe
 - EAN: EAN/Barcode/GTIN
-- HAN: Lieferanten-Artikelnummer/SKU/Style-Nummer
+- HAN: Lieferanten-Artikelnummer/SKU/Style-Nummer — genau hierhin gehören reine Zahlen-/Codespalten wie Stilnummern.
 - EK: Einkaufspreis/Netto-Preis/Kosten
 - VK: Verkaufspreis/Brutto-Preis/UVP
 - Menge: Bestellmenge/Anzahl/Stückzahl
-- Collection: Kollektion/Serie/Marke
+- Collection: Eine ECHTE Kollektions-/Serien-/Markenbezeichnung (z.B. ein Produktlinien-Name). NICHT dasselbe wie ein Lager-/Saisonstatus-Label. Enthält eine Spalte wiederkehrend Werte wie "Noos"/"NOOS" (Never Out Of Stock), "Ongoing Fashion", "Carry-over", "New", "Core", "Repeat", "Basic" — das sind interne Bestell-/Sortimentsstatus-Codes des Lieferanten, KEINE Kollektionsnamen. Eine solche Spalte NICHT auf Collection mappen — setze stattdessen null (diese Information ist für den Import irrelevant).
 - Measurement: Maß/Abmessung
 - InfoMaterial: Material/Info/Zusammensetzung
 - Description: Beschreibung/Details/Freitext (kann auf MEHRERE Spalten verteilt sein — z.B. wenn es getrennte Spalten für Kurz- und Langbeschreibung gibt)
@@ -38,7 +38,7 @@ Spaltenüberschriften (Index beginnt bei 0):
 ${headers.map((h, i) => `${i}: "${h}"`).join('\n')}
 
 ${rows.length > 0 ? `Beispiel-Datenzeilen:\n${rows.map((r, i) => `Zeile ${i + 1}: ${headers.map((h, ci) => `${h}="${(r[ci] ?? '').toString().slice(0, 40)}"`).join(' | ')}`).join('\n')}\n` : ''}
-Ordne jedes Zielfeld dem passenden Spalten-Index zu. Wenn eine Spalte eindeutig nicht existiert, setze null (bzw. leeres Array bei Description). Jede Quellspalte darf nur einem Feld zugeordnet werden (außer eine Spalte passt zu keinem Feld). Nutze den Spalteninhalt (Beispieldaten), nicht nur den Namen, wenn der Header mehrdeutig ist.
+Ordne jedes Zielfeld dem passenden Spalten-Index zu. Wenn eine Spalte eindeutig nicht existiert, setze null (bzw. leeres Array bei Description). Jede Quellspalte darf nur EINEM Feld zugeordnet werden — niemals derselbe Index für zwei verschiedene Felder (außer eine Spalte passt zu keinem Feld, dann null). Nutze den Spalteninhalt (Beispieldaten), nicht nur den Namen, wenn der Header mehrdeutig ist — eine Spalte voller reiner Zahlen ist niemals ItemName, eine Spalte voller Status-Schlagwörter ist niemals Collection.
 
 Antworte NUR mit JSON ohne Markdown:
 {"mapping":{"ItemName":<index|null>,"color":<index|null>,"Size":<index|null>,"EAN":<index|null>,"HAN":<index|null>,"EK":<index|null>,"VK":<index|null>,"Menge":<index|null>,"Collection":<index|null>,"Measurement":<index|null>,"InfoMaterial":<index|null>,"Description":[<index>,...]}}`;
@@ -73,8 +73,22 @@ Antworte NUR mit JSON ohne Markdown:
     const raw = parsed?.mapping || parsed;
     const validIdx = (v) => (Number.isInteger(v) && v >= 0 && v < headers.length ? v : null);
 
+    // The model sometimes reuses the same source column for two different
+    // fields (e.g. a bare style number mapped into both ItemName and HAN),
+    // which then duplicates that raw value inside the built product name.
+    // Enforce one column -> at most one single-value field, first field in
+    // priority order wins.
     const mapping = {};
-    SINGLE_FIELDS.forEach(f => { mapping[f] = validIdx(raw?.[f]); });
+    const usedIdx = new Set();
+    SINGLE_FIELDS.forEach(f => {
+      const idx = validIdx(raw?.[f]);
+      if (idx !== null && usedIdx.has(idx)) {
+        mapping[f] = null;
+      } else {
+        mapping[f] = idx;
+        if (idx !== null) usedIdx.add(idx);
+      }
+    });
     mapping.Description = Array.isArray(raw?.Description) ? raw.Description.filter(v => validIdx(v) !== null) : [];
 
     res.json({ mapping });
