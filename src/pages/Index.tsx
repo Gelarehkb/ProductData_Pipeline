@@ -97,6 +97,7 @@ interface ClothRow {
   VK: string;
   Menge: string;
   Description?: string;
+  Artikelnummer?: string;
   MerkmaleGroesse?: string;
   MerkmaleFarbe?: string;
   MerkmaleArt?: string;
@@ -109,6 +110,11 @@ const getClothName = (row: ClothRow): string => {
     .filter(Boolean)
     .join(" ");
 };
+
+// The Artikelnummer column holds the original Stammdaten naming, pasted in
+// separately from the Name column — it feeds the exported SKU (Artikelnummer),
+// while the Name column stays dedicated to the exported Artikelname.
+const getArtikelnummerName = (row: ClothRow): string => (row.Artikelnummer || "").trim();
 
 // Strip forbidden characters from names for artikelnummer etc. (hyphen "-" is allowed)
 const stripForbiddenChars = (s: string): string => s.replace(/\s+/g, " ").trim();
@@ -128,6 +134,7 @@ const createEmptyRow = (): ClothRow => ({
   VK: "",
   Menge: "",
   Description: "",
+  Artikelnummer: "",
   MerkmaleGroesse: "",
   MerkmaleFarbe: "",
   MerkmaleArt: "",
@@ -1186,6 +1193,7 @@ const Index = () => {
   const baseColumns: { key: keyof ClothRow; label: string; width: string; isDropdown?: boolean; isMultiSelect?: boolean; resizable?: boolean; dropdownOptions?: string[]; translationMap?: Record<string, string> }[] = [
     { key: "Collection", label: t("colCollection", lang), width: "120px", resizable: true },
     { key: "ItemName", label: t("colName", lang), width: "150px", resizable: true },
+    { key: "Artikelnummer", label: t("colArtikelnummer", lang), width: "150px", resizable: true },
     { key: "Measurement", label: t("colMeasurement", lang), width: "80px", resizable: true },
     { key: "InfoMaterial", label: t("colInfoMaterial", lang), width: "100px", resizable: true },
     { key: "WarenGruppe", label: t("colWarenGruppe", lang), width: "150px", isDropdown: true, resizable: true, dropdownOptions: warengruppeOptions, translationMap: warengruppeTranslations },
@@ -2389,7 +2397,7 @@ const Index = () => {
       const name = getClothName(r).trim();
       if (!name) return;
       const wg = r.WarenGruppe || "";
-      const artnr = artikelnummerBuilder(kurzl, name, r.color || "", "", wg, seasonalCode);
+      const artnr = artikelnummerBuilder(kurzl, getArtikelnummerName(r), r.color || "", "", wg, seasonalCode);
       if (!nameGroups[name]) nameGroups[name] = { first: r, variants: [] };
       if (!nameGroups[name].variants.find(v => v.artnr === artnr)) {
         nameGroups[name].variants.push({ artnr, han: r.HAN || "", barcode: r.EAN || "" });
@@ -2404,7 +2412,7 @@ const Index = () => {
         if (variants.length > 1) {
           const wg = first.WarenGruppe || "";
           // Vater has same artikelnummer as first color variant in our builder (empty size/color slot)
-          const vaterArtnr = artikelnummerBuilder(kurzl, name, first.color || "", "", wg, seasonalCode);
+          const vaterArtnr = artikelnummerBuilder(kurzl, getArtikelnummerName(first), first.color || "", "", wg, seasonalCode);
           artikelToName[vaterArtnr] = name;
         }
       });
@@ -2463,7 +2471,7 @@ const Index = () => {
         const items = toClassify.map(name => {
           const { first } = nameGroups[name];
           const wg = first.WarenGruppe || "";
-          const artnr = artikelnummerBuilder(kurzl, name, first.color || "", "", wg, seasonalCode);
+          const artnr = artikelnummerBuilder(kurzl, getArtikelnummerName(first), first.color || "", "", wg, seasonalCode);
           return {
             artikelnummer: artnr,
             artikelname: name,
@@ -2590,7 +2598,7 @@ const Index = () => {
 
       if (hasParent) {
         const firstRowWarengruppe = groupRows[0]?.WarenGruppe || "";
-        const vaterArtikelnummer = artikelnummerBuilder(kurzl, name, color, "", firstRowWarengruppe, SeasonalCode);
+        const vaterArtikelnummer = artikelnummerBuilder(kurzl, getArtikelnummerName(groupRows[0]), color, "", firstRowWarengruppe, SeasonalCode);
         const toNum = (v: string) => {
           const n = parseFloat((v || "").replace(",", "."));
           return isNaN(n) ? Infinity : n;
@@ -2609,7 +2617,7 @@ const Index = () => {
 
       groupRows.forEach(r => {
         const wg = r.WarenGruppe || "";
-        const artikelnummer = artikelnummerBuilder(kurzl, name, color, r.Size, wg, SeasonalCode);
+        const artikelnummer = artikelnummerBuilder(kurzl, getArtikelnummerName(r), color, r.Size, wg, SeasonalCode);
         const eanVal = safe(r.EAN) || "";
         const hanVal = safe(r.HAN) || "";
         const rowGroesse = (r.MerkmaleGroesse || "").split(",").map(v => v.trim()).filter(Boolean).join(", ");
@@ -2617,7 +2625,7 @@ const Index = () => {
         const rowFarbe = (r.MerkmaleFarbe || "").split(",").map(v => v.trim()).filter(Boolean).join(", ");
         outputRows.push(buildRow(
           artikelnummer,
-          hasParent ? artikelnummerBuilder(kurzl, name, color, "", wg, SeasonalCode) : "",
+          hasParent ? artikelnummerBuilder(kurzl, getArtikelnummerName(groupRows[0]), color, "", wg, SeasonalCode) : "",
           name,
           r.Size,
           color,

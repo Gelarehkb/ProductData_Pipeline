@@ -71,6 +71,7 @@ const labels: Record<Lang, Record<string, string>> = {
     // Column labels
     colCollection: "Kollektion",
     colName: "Name",
+    colArtikelnummer: "Artikelnummer",
     colMeasurement: "Maß",
     colInfoMaterial: "Info/Material",
     colItemName: "ItemName",
@@ -150,6 +151,7 @@ const labels: Record<Lang, Record<string, string>> = {
     fillDoubleClick: "Double-click: Auto-fill, Drag: Fill range",
     colCollection: "Collection",
     colName: "Name",
+    colArtikelnummer: "Article No.",
     colMeasurement: "Measurement",
     colInfoMaterial: "Info/Material",
     colItemName: "ItemName",
