@@ -8,6 +8,7 @@ import generateComplex from './routes/generate-complex.js';
 import generateClothing from './routes/generate-clothing.js';
 import mapCategories from './routes/map-categories.js';
 import generateNaming from './routes/generate-naming.js';
+import mapImportColumns from './routes/map-import-columns.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isProd = process.env.NODE_ENV === 'production';
@@ -499,6 +500,7 @@ app.use('/api/generate-online-texts-complex', generateComplex);
 app.use('/api/generate-online-texts-clothing', generateClothing);
 app.use('/api/map-categories', mapCategories);
 app.use('/api/generate-naming', generateNaming);
+app.use('/api/map-import-columns', mapImportColumns);
 
 // Serve built frontend in production
 if (isProd) {

@@ -7,7 +7,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ArrowLeft, Upload, Download, Sparkles, FolderTree, Loader2, Database, Trash2, Plus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { type Lang, t } from "@/lib/translations";
-import { ImportDialog, type ImportTargetField } from "@/components/ImportDialog";
 import { TextPreviewModal, type TextPreviewRow } from "@/components/TextPreviewModal";
 import { CategoryPreviewModal, type CategoryPreviewRow } from "@/components/CategoryPreviewModal";
 import { AIIdentifierPreviewModal, type AIIdentifierPreviewRow } from "@/components/AIIdentifierPreviewModal";
@@ -16,6 +15,7 @@ import {
   mapColorToMerkmaleFarbe, mapSizeToMerkmaleGroesse, artikelnummerBuilder, buildRow,
 } from "@/lib/gesamtExport";
 import { parseJtlCatalogFile, type JtlCatalogRow } from "@/lib/jtlCatalogParser";
+import { parseTabularFile } from "@/lib/tabularFileParser";
 
 // This page reuses the same GESAMT export shape and the same backend AI
 // routes as the main grid (Index.tsx), but sources Artikelnummer/Artikelname/HAN
@@ -112,7 +112,8 @@ const Smart = () => {
   const [lang, setLang] = useState<Lang>("DE");
 
   const [rows, setRows] = useState<ClothRow[]>([]);
-  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const orderFileInputRef = useRef<HTMLInputElement>(null);
+  const [isImportingOrder, setIsImportingOrder] = useState(false);
 
   // ── Toolbar globals — same defaults/roles as Index.tsx, applied uniformly at export ──
   const [kurzl, setKurzl] = useState("");
@@ -173,25 +174,76 @@ const Smart = () => {
     setConfirmedTexts({});
   };
 
-  const handleImportRows = (imported: Partial<Record<ImportTargetField, string>>[]) => {
-    if (imported.length === 0) return;
-    const built = imported.map(item => ({
-      ...createEmptyRow(),
-      ItemName: item.ItemName ?? "",
-      color: item.color ?? "",
-      Size: item.Size ?? "",
-      EAN: item.EAN ?? "",
-      HAN: item.HAN ?? "",
-      EK: (item.EK ?? "").replace(/\./g, ","),
-      VK: (item.VK ?? "").replace(/\./g, ","),
-      Menge: item.Menge ?? "",
-      Collection: item.Collection ?? "",
-      Measurement: item.Measurement ?? "",
-      InfoMaterial: item.InfoMaterial ?? "",
-      Description: item.Description ?? "",
-    }));
-    setRows(prev => [...prev, ...built]);
-    toast({ title: lang === "DE" ? "Bestellung importiert" : "Order imported", description: `${imported.length} ${lang === "DE" ? "Zeilen" : "rows"}` });
+  // ── Order file import — AI analyzes and maps all columns, no manual step ────
+  const handleOrderFileUpload = async (file: File) => {
+    setIsImportingOrder(true);
+    try {
+      const { headers, dataRows } = await parseTabularFile(file);
+      if (headers.length === 0 || dataRows.length === 0) {
+        toast({
+          title: lang === "DE" ? "Keine Daten gefunden" : "No data found",
+          description: lang === "DE" ? "Die Datei enthält keine erkennbaren Datenzeilen." : "The file has no recognizable data rows.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const { data, error } = await apiFetch("map-import-columns", { headers, sampleRows: dataRows.slice(0, 5) });
+      if (error) throw error;
+      const anyData = data as any;
+      if (anyData?.error) throw new Error(anyData.error);
+      const mapping = anyData?.mapping as {
+        ItemName: number | null; color: number | null; Size: number | null; EAN: number | null; HAN: number | null;
+        EK: number | null; VK: number | null; Menge: number | null; Collection: number | null;
+        Measurement: number | null; InfoMaterial: number | null; Description: number[];
+      } | undefined;
+      if (!mapping) throw new Error("Invalid mapping response");
+
+      const get = (idx: number | null, row: string[]) => (idx !== null && idx !== undefined && idx >= 0 ? (row[idx] ?? "").toString().trim() : "");
+      const getMulti = (idxs: number[], row: string[]) => (idxs && idxs.length ? idxs.map(i => (row[i] ?? "").toString().trim()).filter(Boolean).join(", ") : "");
+
+      const built = dataRows
+        .map(row => ({
+          ...createEmptyRow(),
+          ItemName: get(mapping.ItemName, row),
+          color: get(mapping.color, row),
+          Size: get(mapping.Size, row),
+          EAN: get(mapping.EAN, row),
+          HAN: get(mapping.HAN, row),
+          EK: get(mapping.EK, row).replace(/\./g, ","),
+          VK: get(mapping.VK, row).replace(/\./g, ","),
+          Menge: get(mapping.Menge, row),
+          Collection: get(mapping.Collection, row),
+          Measurement: get(mapping.Measurement, row),
+          InfoMaterial: get(mapping.InfoMaterial, row),
+          Description: getMulti(mapping.Description, row),
+        }))
+        .filter(r => r.ItemName || r.color || r.Size || r.EAN || r.HAN || r.EK || r.VK || r.Menge || r.Collection || r.Measurement || r.InfoMaterial);
+
+      if (built.length === 0) {
+        toast({ title: lang === "DE" ? "Keine Zeilen erkannt" : "No rows detected", variant: "destructive" });
+        return;
+      }
+
+      setRows(prev => [...prev, ...built]);
+      const detectedFields = [
+        mapping.ItemName, mapping.color, mapping.Size, mapping.EAN, mapping.HAN, mapping.EK,
+        mapping.VK, mapping.Menge, mapping.Collection, mapping.Measurement, mapping.InfoMaterial,
+      ].filter(v => v !== null && v !== undefined).length + (mapping.Description.length > 0 ? 1 : 0);
+      toast({
+        title: lang === "DE" ? "Bestellung importiert (KI-Zuordnung)" : "Order imported (AI-mapped)",
+        description: `${built.length} ${lang === "DE" ? "Zeilen" : "rows"} · ${detectedFields}/12 ${lang === "DE" ? "Spalten erkannt" : "columns detected"}`,
+      });
+    } catch (err) {
+      console.error("order import failed:", err);
+      toast({
+        title: lang === "DE" ? "Import fehlgeschlagen" : "Import failed",
+        description: err instanceof Error ? err.message : String(err),
+        variant: "destructive",
+      });
+    } finally {
+      setIsImportingOrder(false);
+    }
   };
 
   const handleJtlCatalogUpload = async (file: File) => {
@@ -882,9 +934,18 @@ const Smart = () => {
 
         {/* ── Uploads ────────────────────────────────────────────────────── */}
         <div className="bg-card border border-border rounded-lg px-4 py-3 mb-4 flex flex-wrap items-center gap-3">
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setImportDialogOpen(true)}>
-            <Upload className="h-4 w-4" />
-            {lang === "DE" ? "Neue Bestellung importieren" : "Import new order"}
+          <input
+            ref={orderFileInputRef}
+            type="file"
+            accept=".xlsx,.xls,.csv,.tsv,.txt,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+            className="hidden"
+            onChange={e => { const f = e.target.files?.[0]; if (f) handleOrderFileUpload(f); e.target.value = ""; }}
+          />
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => orderFileInputRef.current?.click()} disabled={isImportingOrder}>
+            {isImportingOrder ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+            {isImportingOrder
+              ? (lang === "DE" ? "Spalten werden erkannt..." : "Detecting columns...")
+              : (lang === "DE" ? "Neue Bestellung importieren" : "Import new order")}
           </Button>
 
           <input
@@ -1042,8 +1103,6 @@ const Smart = () => {
           </Button>
         </div>
       </div>
-
-      <ImportDialog open={importDialogOpen} onOpenChange={setImportDialogOpen} onImport={handleImportRows} lang={lang} />
 
       <AIIdentifierPreviewModal
         open={namingPreviewOpen}
