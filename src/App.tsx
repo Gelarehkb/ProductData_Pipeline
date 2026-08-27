@@ -7,6 +7,7 @@ import Index from "./pages/Index";
 import ArtikelAnlegen from "./pages/ArtikelAnlegen";
 import TextGenerator from "./pages/TextGenerator";
 import Discounts from "./pages/Discounts";
+import Smart from "./pages/Smart";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -22,6 +23,7 @@ const App = () => (
           <Route path="/artikel-anlegen" element={<ArtikelAnlegen />} />
           <Route path="/text-generator" element={<TextGenerator />} />
           <Route path="/discounts" element={<Discounts />} />
+          <Route path="/smart" element={<Smart />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
