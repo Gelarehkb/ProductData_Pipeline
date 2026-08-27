@@ -297,6 +297,9 @@ Your ONLY job: identify the English word(s) that describe WHAT THE OBJECT IS (th
 TRANSLATE only the product-type word(s):
 jacket→Jacke, trousers/pants→Hose, t-shirt→T-Shirt, shirt→Shirt, dress→Kleid, shoes→Schuhe, boots→Stiefel, sneakers→Sneaker, coat→Mantel, vest→Weste, sweater→Pullover, cardigan→Cardigan, overall→Overall, bodysuit→Body, leggings→Leggings, shorts→Shorts, skirt→Rock, tights→Strumpfhose, socks→Socken, hat→Mütze, cap→Cap, scarf→Schal, gloves→Handschuhe, bag→Tasche, backpack→Rucksack, sleeping bag→Schlafsack, blanket→Decke, stroller→Kinderwagen, carrier→Tragehilfe, toy→Spielzeug, pacifier→Schnuller, table→Tisch, chair→Stuhl, shelf→Regal, crib→Gitterbett, mattress→Matratze, pillow→Kissen, blanket→Decke, swimsuit→Badeanzug, swim shorts→Badehose
 
+ALSO translate common fabric/material words when they appear as part of the product description (not inside a percentage composition breakdown):
+wool→Wolle, cotton→Baumwolle, bamboo→Bambus, viscose→Viskose, alpaca→Alpaka, cashmere→Kaschmir, linen→Leinen, silk→Seide, fleece→Fleece, velvet→Samt, corduroy→Cord, denim→Jeans, terry→Frottee, jersey→Jersey
+
 LEAVE UNCHANGED (copy character-for-character):
 - Everything else: brand names, model names, version codes, numbers, patterns (e.g. "Geo3/5", "SS24", "Pro"), colors (e.g. navy, hazel, forest, sage, camel, stone, sand), adjectives, descriptors
 

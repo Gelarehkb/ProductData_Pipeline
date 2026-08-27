@@ -17,6 +17,7 @@ export interface AIIdentifierPreviewRow {
   suggestedLieferant: string;
   matchTier: "warengruppe+name" | "warengruppe" | "name-similarity" | "generic";
   exampleArtikelnummern?: string[];
+  confidence?: "high" | "low";
 }
 
 type EditableCol = "suggestedArtikelnummer" | "suggestedArtikelname" | "suggestedHan" | "suggestedHersteller" | "suggestedLieferant";
@@ -134,6 +135,7 @@ export const AIIdentifierPreviewModal = ({ open, onOpenChange, initialRows, onCo
                 <th className="border px-2 py-1 text-left font-medium whitespace-nowrap" style={{ width: 200 }}>{lang === "DE" ? "Vorschlag Artikelnummer" : "Suggested Artikelnummer"}</th>
                 <th className="border px-2 py-1 text-left font-medium whitespace-nowrap" style={{ width: 200 }}>{lang === "DE" ? "Vorschlag Artikelname" : "Suggested Artikelname"}</th>
                 <th className="border px-2 py-1 text-left font-medium whitespace-nowrap" style={{ width: 140 }}>{lang === "DE" ? "Vorschlag HAN" : "Suggested HAN"}</th>
+                <th className="border px-2 py-1 text-left font-medium whitespace-nowrap" style={{ width: 90 }}>{lang === "DE" ? "Prüfen" : "Review"}</th>
                 <th className="border px-2 py-1 text-left font-medium whitespace-nowrap" style={{ width: 150 }}>{lang === "DE" ? "Vorschlag Hersteller" : "Suggested Manufacturer"}</th>
                 <th className="border px-2 py-1 text-left font-medium whitespace-nowrap" style={{ width: 150 }}>{lang === "DE" ? "Vorschlag Lieferant" : "Suggested Supplier"}</th>
               </tr>
@@ -176,6 +178,18 @@ export const AIIdentifierPreviewModal = ({ open, onOpenChange, initialRows, onCo
                       onChange={e => setCell(row.id, "suggestedHan", e.target.value)}
                     />
                   </td>
+                  <td className="border px-2 py-1 text-center">
+                    {(row.confidence === "low" || row.suggestedHan.includes("?")) && (
+                      <span
+                        className="text-amber-600 dark:text-amber-500"
+                        title={lang === "DE"
+                          ? "Niedrige Sicherheit — bitte manuell prüfen, besonders HAN."
+                          : "Low confidence — please review manually, especially HAN."}
+                      >
+                        ⚠︎
+                      </span>
+                    )}
+                  </td>
                   <td className="border p-0">
                     <input
                       className="w-full h-7 px-2 bg-transparent border-none outline-none focus:ring-2 focus:ring-primary/50 text-xs"
@@ -194,7 +208,7 @@ export const AIIdentifierPreviewModal = ({ open, onOpenChange, initialRows, onCo
               ))}
               {displayRows.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="border px-4 py-6 text-center text-muted-foreground text-xs">
+                  <td colSpan={11} className="border px-4 py-6 text-center text-muted-foreground text-xs">
                     {filterText ? (lang === "DE" ? "Keine Treffer." : "No matches.") : (lang === "DE" ? "Keine Daten." : "No data.")}
                   </td>
                 </tr>

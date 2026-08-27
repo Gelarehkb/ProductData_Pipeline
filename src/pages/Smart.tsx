@@ -430,6 +430,28 @@ const Smart = () => {
       candidatesByKey[key] = buildNamingCandidates(groupRows[0], jtlCatalogRows);
     });
 
+    // Artikelname is NOT the same naming system as Artikelnummer: Artikelnummer
+    // keeps the Stammdaten-style descriptive name (brand + English/style
+    // terms), while Artikelname is the shop's short, generic Austrian-German
+    // customer label (e.g. "Crawling Tights Merino Wool" -> "Strumpfhose
+    // Wolle"). That translation already exists and is proven in the main
+    // grid (/api/translate-article-names) — reuse it here instead of asking
+    // the naming-pattern AI to invent both at once, which kept collapsing
+    // into the same text for both fields.
+    const translatedByKey: Record<string, string> = {};
+    try {
+      const baseNames = groupEntries.map(([, groupRows]) => getBaseNameForNaming(groupRows[0]));
+      const { data: trData, error: trError } = await apiFetch("translate-article-names", { articleNames: baseNames });
+      if (!trError) {
+        const translations = (trData as any)?.translations;
+        if (Array.isArray(translations)) {
+          groupEntries.forEach(([key], idx) => { translatedByKey[key] = (translations[idx]?.de || "").trim(); });
+        }
+      }
+    } catch (trErr) {
+      console.error("translate-article-names failed, falling back to untranslated names:", trErr);
+    }
+
     setIsGeneratingNames(true);
     const previewRows: AIIdentifierPreviewRow[] = [];
     let failedChunks = 0;
@@ -454,12 +476,13 @@ const Smart = () => {
               id: key,
               originalName: name, color, size: r0.Size || "", warengruppe: wg, hersteller: cand.resolvedHersteller,
               suggestedArtikelnummer: artikelnummerBuilder(kurzl, getBaseNameForNaming(r0), color, "", wg, seasonalCode),
-              suggestedArtikelname: toProperCase(getBaseNameForNaming(r0)),
+              suggestedArtikelname: translatedByKey[key] || toProperCase(getBaseNameForNaming(r0)),
               suggestedHan: r0.HAN || "",
               suggestedHersteller: cand.resolvedHersteller,
               suggestedLieferant: cand.resolvedLieferant,
               matchTier: cand.matchTier,
               exampleArtikelnummern: cand.examples.map(e => e.artikelnummer),
+              confidence: "low",
             });
           });
         };
@@ -494,12 +517,13 @@ const Smart = () => {
               id: key,
               originalName: name, color, size: r0.Size || "", warengruppe: wg, hersteller: cand.resolvedHersteller,
               suggestedArtikelnummer: result?.artikelnummer || artikelnummerBuilder(kurzl, getBaseNameForNaming(r0), color, "", wg, seasonalCode),
-              suggestedArtikelname: result?.artikelname || toProperCase(getBaseNameForNaming(r0)),
+              suggestedArtikelname: translatedByKey[key] || result?.artikelname || toProperCase(getBaseNameForNaming(r0)),
               suggestedHan: result?.han || r0.HAN || "",
               suggestedHersteller: cand.resolvedHersteller,
               suggestedLieferant: cand.resolvedLieferant,
               matchTier: cand.matchTier,
               exampleArtikelnummern: cand.examples.map(e => e.artikelnummer),
+              confidence: result?.confidence === "high" ? "high" : "low",
             });
           });
         } catch (chunkErr) {
