@@ -39,6 +39,22 @@ export const getArtikelnummerName = (row: ClothRow): string => (row.Artikelnumme
 // Strip forbidden characters from names for artikelnummer etc. (hyphen "-" is allowed)
 export const stripForbiddenChars = (s: string): string => s.replace(/\s+/g, " ").trim();
 
+// Returns each value that appears more than once (blank values ignored —
+// missing Artikelnummer is its own separate problem, not a "duplicate").
+// Used to block a GESAMT export whose SKUs collide, since JTL import
+// silently overwrites/conflates rows sharing the same Artikelnummer.
+export const findDuplicateValues = (values: string[]): string[] => {
+  const seen = new Set<string>();
+  const dupes = new Set<string>();
+  values.forEach(v => {
+    const trimmed = (v || "").trim();
+    if (!trimmed) return;
+    if (seen.has(trimmed)) dupes.add(trimmed);
+    else seen.add(trimmed);
+  });
+  return [...dupes];
+};
+
 export const safe = (val: string | null | undefined): string => {
   if (val === null || val === undefined) return "";
   const v = String(val).trim();

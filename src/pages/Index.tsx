@@ -36,7 +36,7 @@ import { type Lang, t, warengruppeTranslations, farbeTranslations, artTranslatio
 import {
   type ClothRow, getClothName, getArtikelnummerName, stripForbiddenChars, safe,
   toProperCase, mapSizeToMerkmaleGroesse, mapColorToMerkmaleFarbe,
-  AUFSE_WARENGRUPPEN, artikelnummerBuilder, buildRow,
+  AUFSE_WARENGRUPPEN, artikelnummerBuilder, buildRow, findDuplicateValues,
 } from "@/lib/gesamtExport";
 
 interface CellPosition {
@@ -2454,6 +2454,21 @@ const Index = () => {
       });
     });
     if (outputRows.length === 0) return;
+
+    // Block the export outright if any Artikelnummer repeats — JTL import
+    // silently overwrites/conflates rows sharing the same SKU, so this must
+    // never reach a downloaded file unnoticed.
+    const duplicateArtikelnummern = findDuplicateValues(outputRows.map(r => String(r["Artikelnummer"] ?? "")));
+    if (duplicateArtikelnummern.length > 0) {
+      toast({
+        title: lang === "DE" ? "Export blockiert — doppelte Artikelnummer" : "Export blocked — duplicate Artikelnummer",
+        description: lang === "DE"
+          ? `${duplicateArtikelnummern.length} Artikelnummer(n) kommen mehrfach vor: ${duplicateArtikelnummern.slice(0, 5).join(", ")}${duplicateArtikelnummern.length > 5 ? ", ..." : ""}. Bitte beheben (z.B. Name/Farbe/Größe prüfen) und erneut exportieren.`
+          : `${duplicateArtikelnummern.length} Artikelnummer(s) appear more than once: ${duplicateArtikelnummern.slice(0, 5).join(", ")}${duplicateArtikelnummern.length > 5 ? ", ..." : ""}. Please fix and export again.`,
+        variant: "destructive",
+      });
+      return;
+    }
 
     const headers = Object.keys(outputRows[0]);
     const escCsv = (v: any) => {

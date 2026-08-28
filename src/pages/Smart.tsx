@@ -13,6 +13,7 @@ import { AIIdentifierPreviewModal, type AIIdentifierPreviewRow } from "@/compone
 import {
   type ClothRow, getClothName, safe, toProperCase, stripForbiddenChars,
   mapColorToMerkmaleFarbe, mapSizeToMerkmaleGroesse, artikelnummerBuilder, buildRow,
+  findDuplicateValues,
 } from "@/lib/gesamtExport";
 import { parseJtlCatalogFile, type JtlCatalogRow } from "@/lib/jtlCatalogParser";
 import { parseTabularFile } from "@/lib/tabularFileParser";
@@ -1064,6 +1065,21 @@ const Smart = () => {
     const outputRows = computeOutputRows();
     if (outputRows.length === 0) {
       toast({ title: t("noData", lang), description: t("noDataDesc", lang), variant: "destructive" });
+      return;
+    }
+
+    // Block the export outright if any Artikelnummer repeats — JTL import
+    // silently overwrites/conflates rows sharing the same SKU, so this must
+    // never reach a downloaded file unnoticed.
+    const duplicateArtikelnummern = findDuplicateValues(outputRows.map(r => String(r["Artikelnummer"] ?? "")));
+    if (duplicateArtikelnummern.length > 0) {
+      toast({
+        title: lang === "DE" ? "Export blockiert — doppelte Artikelnummer" : "Export blocked — duplicate Artikelnummer",
+        description: lang === "DE"
+          ? `${duplicateArtikelnummern.length} Artikelnummer(n) kommen mehrfach vor: ${duplicateArtikelnummern.slice(0, 5).join(", ")}${duplicateArtikelnummern.length > 5 ? ", ..." : ""}. Bitte KI-Namen/Formel prüfen und erneut exportieren.`
+          : `${duplicateArtikelnummern.length} Artikelnummer(s) appear more than once: ${duplicateArtikelnummern.slice(0, 5).join(", ")}${duplicateArtikelnummern.length > 5 ? ", ..." : ""}. Please review AI naming/formula and export again.`,
+        variant: "destructive",
+      });
       return;
     }
 
