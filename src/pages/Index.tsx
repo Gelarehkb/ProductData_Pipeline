@@ -10,7 +10,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Download, Trash2, ClipboardPaste, Undo2, Sparkles, Loader2, Globe, Plus, Upload, FolderTree, Eye, RotateCcw, Percent, Database, Wand2 } from "lucide-react";
+import { Download, Trash2, ClipboardPaste, Undo2, Sparkles, Loader2, Globe, Plus, Upload, FolderTree, Eye, RotateCcw, Percent, Database, Wand2, Radio } from "lucide-react";
 import { MerkmaleMultiSelect } from "@/components/MerkmaleMultiSelect";
 import { useToast } from "@/hooks/use-toast";
 import { FindReplaceDialog } from "@/components/FindReplaceDialog";
@@ -2585,6 +2585,12 @@ const Index = () => {
               <Button variant="outline" size="sm" className="gap-1.5 text-xs">
                 <Wand2 className="h-3.5 w-3.5" />
                 Smart
+              </Button>
+            </a>
+            <a href="/sales-channel">
+              <Button variant="outline" size="sm" className="gap-1.5 text-xs">
+                <Radio className="h-3.5 w-3.5" />
+                Sale Channel
               </Button>
             </a>
             <Button
