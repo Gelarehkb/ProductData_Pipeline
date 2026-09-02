@@ -305,6 +305,8 @@ LEAVE UNCHANGED (copy character-for-character):
 
 If the name is already German, return it unchanged.
 
+Never output a word twice within the same result, in any casing — translate or leave each word exactly once.
+
 Product names:
 ${articleNames.map((name, i) => `${i + 1}. ${name}`).join('\n')}
 

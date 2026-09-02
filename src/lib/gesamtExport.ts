@@ -162,9 +162,14 @@ export const buildRow = (
     check = "";
   }
 
-  // Proper Case name + lowercase color, no double spaces
+  // Proper Case name + lowercase color, no double spaces. A confirmed
+  // AI-generated name can already fold the color into itself (mirroring the
+  // reference JTL convention) — only append color here if it isn't already
+  // part of the name, so it's never duplicated.
   const fmtName = (n: string) => toProperCase(n);
-  const nameWithColor = [fmtName(translatedName || name), color ? color.toLowerCase() : ""].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+  const baseName = fmtName(translatedName || name);
+  const alreadyHasColor = color !== "" && baseName.toLowerCase().includes(color.toLowerCase());
+  const nameWithColor = [baseName, alreadyHasColor ? "" : color.toLowerCase()].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
 
   return {
     "für Kassa aktivieren": "Y",

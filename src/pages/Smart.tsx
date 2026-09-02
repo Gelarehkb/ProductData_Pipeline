@@ -45,13 +45,40 @@ const createEmptyRow = (): ClothRow => ({
   Description: "", MerkmaleGroesse: "", MerkmaleFarbe: "", MerkmaleArt: "",
 });
 
+// Joins field values with a space, but skips a field whose content is
+// already present in what's been joined so far, and merges a field without
+// repeating a shared prefix/suffix overlap. Supplier order files routinely
+// duplicate the same descriptive text across separate columns (e.g.
+// Collection "Crawling Tights" and ItemName "Crawling Tights Merino") — a
+// naive join repeats the shared words verbatim in the generated name.
+const joinDedupingOverlap = (parts: (string | undefined)[]): string => {
+  let acc = "";
+  for (const raw of parts) {
+    const part = (raw || "").trim();
+    if (!part) continue;
+    if (!acc) { acc = part; continue; }
+    const accLower = acc.toLowerCase();
+    const partLower = part.toLowerCase();
+    if (accLower.includes(partLower)) continue; // already fully present
+    if (partLower.includes(accLower)) { acc = part; continue; } // part is a superset
+    const accWords = acc.split(/\s+/);
+    const partWords = part.split(/\s+/);
+    let overlap = 0;
+    for (let n = Math.min(accWords.length, partWords.length); n > 0; n--) {
+      if (accWords.slice(-n).join(" ").toLowerCase() === partWords.slice(0, n).join(" ").toLowerCase()) { overlap = n; break; }
+    }
+    acc = [acc, ...partWords.slice(overlap)].join(" ");
+  }
+  return acc;
+};
+
 // Like getClothName, but excludes InfoMaterial — used ONLY for the naming
 // fallback/matching, never for grouping. Supplier order files often dump raw
 // fibre-composition text ("80% Wool, 17% Polyamide, 3% Elastane") into
 // InfoMaterial via the AI column-mapping step, and that text must never end
 // up baked into a customer-facing Artikelnummer/Artikelname.
 const getBaseNameForNaming = (row: ClothRow): string =>
-  [row.Collection, row.ItemName, row.Measurement].map(s => s?.trim() || "").filter(Boolean).join(" ");
+  joinDedupingOverlap([row.Collection, row.ItemName, row.Measurement]);
 
 const WARENGRUPPE_OPTIONS = [
   "Accessoires", "Care", "Deko", "Dienstleistungen", "Essen/Trinken", "Fahren", "Fahrräder",
@@ -501,6 +528,16 @@ const Smart = () => {
             };
           });
 
+          // Diagnostic: surfaces whether the matcher is actually finding real
+          // JTL references (vs. degrading to "generic"/empty examples, which
+          // is when the model has nothing to mimic and falls back to echoing
+          // the raw input). Check the browser console after running "KI-Namen
+          // generieren" if suggestions look off.
+          console.debug("generate-naming candidates:", items.map(it => ({
+            id: it.id, warengruppe: it.warengruppe, matchTier: it.matchTier, exampleCount: it.examples.length,
+            examples: it.examples,
+          })));
+
           const { data, error } = await apiFetch("generate-naming", { items });
           if (error) throw error;
           const anyData = data as any;
@@ -576,7 +613,12 @@ const Smart = () => {
     const suggestion = namingSuggestions[key];
     if (suggestion?.suggestedArtikelnummer?.trim()) {
       const base = suggestion.suggestedArtikelnummer.trim();
-      return size ? `${base} ${stripForbiddenChars(size).toUpperCase()}` : base;
+      // An AI-confirmed Artikelnummer already follows the reference JTL
+      // convention, which often folds size directly in — only append it
+      // here if it's not already part of the confirmed value.
+      const sizeToken = size ? stripForbiddenChars(size).toUpperCase() : "";
+      const alreadyHasSize = sizeToken !== "" && base.toUpperCase().includes(sizeToken);
+      return sizeToken && !alreadyHasSize ? `${base} ${sizeToken}` : base;
     }
     const wg = row.WarenGruppe || "";
     return artikelnummerBuilder(kurzl, getBaseNameForNaming(row), color, size, wg, seasonalCode);
