@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Loader2, Download, Sparkles, Undo2, ArrowLeft, Globe } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { type Lang, t } from "@/lib/translations";
 
 // ---------------------------------------------------------------------------
 // API helper
@@ -88,7 +89,7 @@ const normalizeMode = (v: string): Mode => (v.trim().toLowerCase().startsWith("s
 // ---------------------------------------------------------------------------
 // Mode swatch (segmented toggle)
 // ---------------------------------------------------------------------------
-function ModeSwatch({ value, onChange, lang, xs = false }: { value: Mode; onChange: (m: Mode) => void; lang: "DE" | "EN"; xs?: boolean }) {
+function ModeSwatch({ value, onChange, lang, xs = false }: { value: Mode; onChange: (m: Mode) => void; lang: Lang; xs?: boolean }) {
   const labels: Record<Mode, string> = {
     simple: lang === "DE" ? "Einfach" : "Simple",
     complex: lang === "DE" ? "Komplex" : "Complex",
@@ -102,9 +103,7 @@ function ModeSwatch({ value, onChange, lang, xs = false }: { value: Mode; onChan
           onClick={() => onChange(m)}
           className={`font-medium transition-colors ${xs ? "px-1.5 py-0.5 text-[10px]" : "px-2 py-1 text-xs"} ${
             value === m
-              ? m === "simple"
-                ? "bg-emerald-500 text-white"
-                : "bg-indigo-500 text-white"
+              ? "bg-primary text-primary-foreground hover:bg-primary/90"
               : "bg-muted text-muted-foreground hover:bg-muted/70"
           }`}
         >
@@ -170,7 +169,7 @@ function csvEscape(val: string): string {
 export default function TextGenerator() {
   const { toast } = useToast();
 
-  const [lang, setLang] = useState<"DE" | "EN">("DE");
+  const [lang, setLang] = useState<Lang>("DE");
   const [hersteller, setHersteller] = useState("");
   const [rowCountInput, setRowCountInput] = useState("10");
   const [defaultMode, setDefaultMode] = useState<Mode>("complex");
@@ -647,6 +646,9 @@ export default function TextGenerator() {
             <h1 className="text-2xl font-bold text-foreground">
               {lang === "DE" ? "Textgenerator" : "Text Generator"}
             </h1>
+            <span className="text-xs text-muted-foreground">
+              {lang === "DE" ? "KI-Produkttexte für mehrere Artikel auf einmal" : "AI product texts for multiple items at once"}
+            </span>
           </div>
           <Button
             variant="outline"
@@ -663,7 +665,7 @@ export default function TextGenerator() {
         <div className="bg-card border border-border rounded-lg px-4 py-3 mb-4 flex flex-wrap items-end gap-3">
           <div className="flex flex-col gap-1">
             <Label htmlFor="hersteller-tg" className="text-xs">
-              {lang === "DE" ? "Hersteller" : "Brand"}
+              {t("hersteller", lang)}
             </Label>
             <Input
               id="hersteller-tg"
@@ -700,7 +702,7 @@ export default function TextGenerator() {
 
           <Button size="sm" variant="outline" className="gap-1.5" onClick={handleExport}>
             <Download className="h-4 w-4" />
-            CSV Export
+            {t("csvExport", lang)}
           </Button>
 
           <Button size="sm" variant="outline" className="gap-1.5" onClick={handleUndo} disabled={history.length === 0} title="Ctrl+Z">
