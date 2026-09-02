@@ -1,9 +1,8 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { Loader2, Download, Sparkles, Undo2, ArrowLeft } from "lucide-react";
+import { Loader2, Download, Sparkles, Undo2, ArrowLeft, Globe } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 // ---------------------------------------------------------------------------
@@ -636,224 +635,236 @@ export default function TextGenerator() {
   const totalWidth = COLUMNS.reduce((s, c) => s + c.width, 0) + 40;
 
   return (
-    <div className="h-screen bg-background flex flex-col">
-
-      {/* ── Top bar ─────────────────────────────────────────────────────────── */}
-      <div className="shrink-0 bg-background border-b border-border px-4 py-2 flex flex-wrap items-center gap-3">
-        <a href="/" className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0">
-          <ArrowLeft className="h-4 w-4" />
-          {lang === "DE" ? "Zurück" : "Back"}
-        </a>
-
-        <span className="text-sm font-semibold text-foreground shrink-0">
-          {lang === "DE" ? "Textgenerator" : "Text Generator"}
-        </span>
-
-        <div className="flex items-center gap-1.5 shrink-0">
-          <Label htmlFor="hersteller-tg" className="text-xs text-muted-foreground whitespace-nowrap">
-            {lang === "DE" ? "Hersteller" : "Brand"}
-          </Label>
-          <Input
-            id="hersteller-tg"
-            value={hersteller}
-            onChange={e => setHersteller(e.target.value)}
-            placeholder="z.B. SNUG"
-            className="h-7 text-sm w-40"
-          />
+    <div className="min-h-screen bg-background p-6">
+      <div className="max-w-[1400px] mx-auto">
+        {/* ── Header ────────────────────────────────────────────────────────── */}
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <a href="/" className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors">
+              <ArrowLeft className="h-4 w-4" />
+              {lang === "DE" ? "Zurück" : "Back"}
+            </a>
+            <h1 className="text-2xl font-bold text-foreground">
+              {lang === "DE" ? "Textgenerator" : "Text Generator"}
+            </h1>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={() => setLang(prev => prev === "DE" ? "EN" : "DE")}
+          >
+            <Globe className="h-4 w-4" />
+            {lang === "DE" ? "EN" : "DE"}
+          </Button>
         </div>
 
-        <div className="flex items-center gap-1.5 shrink-0">
-          <Label className="text-xs text-muted-foreground whitespace-nowrap">
-            {lang === "DE" ? "Prompt für alle" : "Prompt for all"}
-          </Label>
-          <ModeSwatch value={defaultMode} onChange={handleDefaultModeChange} lang={lang} />
+        {/* ── Toolbar ───────────────────────────────────────────────────────── */}
+        <div className="bg-card border border-border rounded-lg px-4 py-3 mb-4 flex flex-wrap items-end gap-3">
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="hersteller-tg" className="text-xs">
+              {lang === "DE" ? "Hersteller" : "Brand"}
+            </Label>
+            <Input
+              id="hersteller-tg"
+              value={hersteller}
+              onChange={e => setHersteller(e.target.value)}
+              placeholder="z.B. SNUG"
+              className="h-8 text-xs w-40"
+            />
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <Label className="text-xs">
+              {lang === "DE" ? "Prompt für alle" : "Prompt for all"}
+            </Label>
+            <ModeSwatch value={defaultMode} onChange={handleDefaultModeChange} lang={lang} />
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <Label className="text-xs">{lang === "DE" ? "Zeilen" : "Rows"}</Label>
+            <Input
+              type="number" min={1} max={200}
+              value={rowCountInput}
+              onChange={e => setRowCountInput(e.target.value)}
+              onBlur={applyRowCountInput}
+              onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); applyRowCountInput(); } }}
+              className="h-8 w-16 text-xs"
+            />
+          </div>
+
+          <Button size="sm" className="gap-1.5" onClick={handleGenerate} disabled={generating}>
+            {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+            {lang === "DE" ? "Generieren" : "Generate"}
+          </Button>
+
+          <Button size="sm" variant="outline" className="gap-1.5" onClick={handleExport}>
+            <Download className="h-4 w-4" />
+            CSV Export
+          </Button>
+
+          <Button size="sm" variant="outline" className="gap-1.5" onClick={handleUndo} disabled={history.length === 0} title="Ctrl+Z">
+            <Undo2 className="h-4 w-4" />
+            {lang === "DE" ? "Rückgängig" : "Undo"}
+          </Button>
         </div>
 
-        <Button size="sm" className="gap-1.5 h-7 text-xs shrink-0" onClick={handleGenerate} disabled={generating}>
-          {generating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-          {lang === "DE" ? "Generieren" : "Generate"}
-        </Button>
-
-        <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs shrink-0" onClick={handleExport}>
-          <Download className="h-3.5 w-3.5" />
-          CSV Export
-        </Button>
-
-        <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs shrink-0" onClick={handleUndo} disabled={history.length === 0} title="Ctrl+Z">
-          <Undo2 className="h-3.5 w-3.5" />
-        </Button>
-
-        <div className="flex items-center gap-1.5 shrink-0">
-          <Label className="text-xs text-muted-foreground">{lang === "DE" ? "Zeilen" : "Rows"}</Label>
-          <Input
-            type="number" min={1} max={200}
-            value={rowCountInput}
-            onChange={e => setRowCountInput(e.target.value)}
-            onBlur={applyRowCountInput}
-            onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); applyRowCountInput(); } }}
-            className="h-7 w-16 text-sm"
-          />
+        {/* ── Status line ───────────────────────────────────────────────────── */}
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-sm font-medium text-foreground">
+            {lang === "DE" ? "Artikel" : "Items"}
+          </span>
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            <span>{rows.length} {lang === "DE" ? "Zeilen" : "rows"}</span>
+            {selection.length > 0 && (
+              <span>{selection.length} {lang === "DE" ? "Zellen ausgewählt" : "cells selected"}</span>
+            )}
+            {history.length > 0 && (
+              <span className="opacity-60">{history.length} {lang === "DE" ? "Schritte" : "steps"} (Ctrl+Z)</span>
+            )}
+          </div>
         </div>
 
-        <div className="flex items-center gap-1.5 ml-auto shrink-0">
-          <Label className="text-xs text-muted-foreground">DE</Label>
-          <Switch checked={lang === "EN"} onCheckedChange={v => setLang(v ? "EN" : "DE")} className="scale-75" />
-          <Label className="text-xs text-muted-foreground">EN</Label>
-        </div>
-      </div>
+        {/* ── Table ─────────────────────────────────────────────────────────── */}
+        <div className="border border-border rounded-lg overflow-hidden mb-4">
+          <div className="overflow-auto" style={{ maxHeight: "65vh" }} onMouseLeave={() => setIsSelecting(false)}>
+            <table
+              className="table-fixed border-collapse text-sm select-none"
+              style={{ minWidth: totalWidth }}
+            >
+              <colgroup>
+                <col style={{ width: 40 }} />
+                {COLUMNS.map(c => <col key={c.key} style={{ width: c.width }} />)}
+              </colgroup>
 
-      {/* ── Table ───────────────────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-auto"
-        onMouseLeave={() => setIsSelecting(false)}
-      >
-        <table
-          className="table-fixed border-collapse text-sm select-none"
-          style={{ minWidth: totalWidth }}
-        >
-          <colgroup>
-            <col style={{ width: 40 }} />
-            {COLUMNS.map(c => <col key={c.key} style={{ width: c.width }} />)}
-          </colgroup>
-
-          {/* Sticky header */}
-          <thead className="sticky top-0 z-10">
-            <tr>
-              <th className="border border-[hsl(0,0%,85%)] bg-muted px-2 py-1.5 text-left text-xs font-medium text-muted-foreground w-10 select-none">#</th>
-              {COLUMNS.map(c => (
-                <th
-                  key={c.key}
-                  className={`border border-[hsl(0,0%,85%)] px-2 py-1.5 text-left text-xs font-semibold cursor-pointer hover:bg-muted/80 ${
-                    c.isOutput
-                      ? "bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300"
-                      : "bg-muted text-muted-foreground"
-                  }`}
-                  style={{ width: c.width }}
-                  onClick={e => {
-                    const cells: CellPos[] = rows.map((_, r) => ({ row: r, col: COLUMNS.indexOf(c) }));
-                    if (e.shiftKey && selectionStart) {
-                      const ci = COLUMNS.indexOf(c);
-                      const all: CellPos[] = [];
-                      for (let r = 0; r < rows.length; r++)
-                        for (let cc = Math.min(selectionStart.col, ci); cc <= Math.max(selectionStart.col, ci); cc++)
-                          all.push({ row: r, col: cc });
-                      setSelection(all);
-                    } else {
-                      setSelection(cells);
-                      setSelectionStart({ row: 0, col: COLUMNS.indexOf(c) });
-                    }
-                  }}
-                >
-                  {lang === "DE" ? c.labelDE : c.labelEN}
-                  {c.labelDE !== c.labelEN && (
-                    <div className="text-[10px] opacity-60 font-normal">{lang === "DE" ? c.labelEN : c.labelDE}</div>
-                  )}
-                </th>
-              ))}
-            </tr>
-          </thead>
-
-          <tbody>
-            {rows.map((row, rowIdx) => (
-              <tr key={row.id} className="group hover:bg-muted/10">
-                {/* Row number — click to select row */}
-                <td
-                  className="border border-[hsl(0,0%,85%)] px-1 py-0 text-center text-xs text-muted-foreground bg-muted/40 select-none cursor-pointer hover:bg-muted/70"
-                  onMouseDown={e => handleRowSelect(rowIdx, e)}
-                >
-                  {rowIdx + 1}
-                </td>
-
-                {COLUMNS.map((col, colIdx) => {
-                  const isSelected = isCellSelected(rowIdx, colIdx);
-                  const isInFillRange = fillHandleDrag &&
-                    colIdx === fillHandleDrag.sourceCol &&
-                    rowIdx !== fillHandleDrag.sourceRow &&
-                    rowIdx >= Math.min(fillHandleDrag.sourceRow, fillHandleDrag.targetRow) &&
-                    rowIdx <= Math.max(fillHandleDrag.sourceRow, fillHandleDrag.targetRow);
-                  const value = row[col.key];
-
-                  return (
-                    <td
-                      key={col.key}
-                      className={`group/cell border border-[hsl(0,0%,85%)] p-0 relative ${
-                        isInFillRange
-                          ? "bg-primary/30 ring-1 ring-primary ring-inset"
-                          : isSelected
-                          ? "bg-primary/20 ring-2 ring-primary ring-inset"
-                          : col.isOutput
-                          ? "bg-blue-50/30 dark:bg-blue-950/10"
-                          : ""
+              {/* Sticky header */}
+              <thead className="sticky top-0 z-10">
+                <tr className="bg-[hsl(0,0%,85%)]">
+                  <th className="border border-[hsl(0,0%,75%)] px-2 py-2 text-left text-xs font-semibold text-muted-foreground w-10 select-none">#</th>
+                  {COLUMNS.map(c => (
+                    <th
+                      key={c.key}
+                      className={`border border-[hsl(0,0%,75%)] px-2 py-2 text-left text-xs font-semibold cursor-pointer hover:bg-[hsl(0,0%,80%)] ${
+                        c.isOutput ? "bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300" : ""
                       }`}
-                      style={{ width: col.width }}
-                      onMouseDown={e => handleCellMouseDown(e, rowIdx, colIdx)}
-                      onMouseEnter={() => handleCellMouseEnter(rowIdx, colIdx)}
-                      onMouseUp={() => { if (fillHandleDrag) { /* handled by global */ } }}
+                      style={{ width: c.width }}
+                      onClick={e => {
+                        const cells: CellPos[] = rows.map((_, r) => ({ row: r, col: COLUMNS.indexOf(c) }));
+                        if (e.shiftKey && selectionStart) {
+                          const ci = COLUMNS.indexOf(c);
+                          const all: CellPos[] = [];
+                          for (let r = 0; r < rows.length; r++)
+                            for (let cc = Math.min(selectionStart.col, ci); cc <= Math.max(selectionStart.col, ci); cc++)
+                              all.push({ row: r, col: cc });
+                          setSelection(all);
+                        } else {
+                          setSelection(cells);
+                          setSelectionStart({ row: 0, col: COLUMNS.indexOf(c) });
+                        }
+                      }}
                     >
-                      {col.key === "mode" ? (
-                        <div className="w-full h-full px-2 py-1.5 flex items-center" data-row={rowIdx} data-col={colIdx}>
-                          <ModeSwatch value={row.mode} onChange={m => handleModeChange(row.id, m)} lang={lang} xs />
-                        </div>
-                      ) : (
-                        <input
-                          type="text"
-                          value={value}
-                          data-row={rowIdx}
-                          data-col={colIdx}
-                          onChange={e => handleCellChange(row.id, col.key, e.target.value)}
-                          onPaste={e => handleCellPaste(e, rowIdx, colIdx, col.key)}
-                          onKeyDown={e => handleKeyNavigation(e, rowIdx, colIdx)}
-                          onFocus={() => {
-                            if (!selection.some(s => s.row === rowIdx && s.col === colIdx)) {
-                              setSelection([{ row: rowIdx, col: colIdx }]);
-                              setSelectionStart({ row: rowIdx, col: colIdx });
-                            }
-                          }}
-                          className="w-full px-2 py-1.5 bg-transparent border-none outline-none focus:ring-2 focus:ring-primary/50 text-sm"
-                          style={{ minWidth: 0 }}
-                        />
+                      {lang === "DE" ? c.labelDE : c.labelEN}
+                      {c.labelDE !== c.labelEN && (
+                        <div className="text-[10px] opacity-60 font-normal">{lang === "DE" ? c.labelEN : c.labelDE}</div>
                       )}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
 
-                      {/* Fill handle (black cube) */}
-                      {value && rowIdx < rows.length - 1 && (
-                        <div
-                          className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-primary cursor-crosshair z-20 border border-background opacity-0 group-hover/cell:opacity-100"
-                          onMouseDown={e => handleFillHandleMouseDown(e, rowIdx, colIdx)}
-                          onDoubleClick={e => { e.stopPropagation(); handleFillDoubleClick(rowIdx, colIdx); }}
-                          title={lang === "DE" ? "Ziehen zum Ausfüllen" : "Drag to fill"}
-                        />
-                      )}
+              <tbody>
+                {rows.map((row, rowIdx) => (
+                  <tr key={row.id} className={rowIdx % 2 === 0 ? "bg-[hsl(0,0%,96%)]" : "bg-[hsl(0,0%,92%)]"}>
+                    {/* Row number — click to select row */}
+                    <td
+                      className="border border-[hsl(0,0%,85%)] px-1 py-1 text-center text-xs text-muted-foreground bg-[hsl(0,0%,90%)] select-none cursor-pointer hover:bg-[hsl(0,0%,85%)]"
+                      onMouseDown={e => handleRowSelect(rowIdx, e)}
+                    >
+                      {rowIdx + 1}
                     </td>
-                  );
-                })}
-              </tr>
-            ))}
 
-            {/* Add row */}
-            <tr>
-              <td
-                colSpan={COLUMNS.length + 1}
-                className="border border-[hsl(0,0%,85%)] px-3 py-1 text-center cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/30 text-xs transition-colors select-none"
-                onClick={() => {
-                  setRows(prev => [...prev, createEmptyRow(defaultMode)]);
-                  setRowCountInput(String(rows.length + 1));
-                }}
-              >
-                + {lang === "DE" ? "Zeile hinzufügen" : "Add row"}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+                    {COLUMNS.map((col, colIdx) => {
+                      const isSelected = isCellSelected(rowIdx, colIdx);
+                      const isInFillRange = fillHandleDrag &&
+                        colIdx === fillHandleDrag.sourceCol &&
+                        rowIdx !== fillHandleDrag.sourceRow &&
+                        rowIdx >= Math.min(fillHandleDrag.sourceRow, fillHandleDrag.targetRow) &&
+                        rowIdx <= Math.max(fillHandleDrag.sourceRow, fillHandleDrag.targetRow);
+                      const value = row[col.key];
 
-      {/* ── Footer ──────────────────────────────────────────────────────────── */}
-      <div className="shrink-0 bg-background border-t border-border px-4 py-1.5 flex items-center gap-4 text-xs text-muted-foreground">
-        <span>{rows.length} {lang === "DE" ? "Zeilen" : "rows"}</span>
-        {selection.length > 0 && (
-          <span>{selection.length} {lang === "DE" ? "Zellen ausgewählt" : "cells selected"}</span>
-        )}
-        {history.length > 0 && (
-          <span className="ml-auto opacity-50">{history.length} {lang === "DE" ? "Schritte" : "steps"} (Ctrl+Z)</span>
-        )}
+                      return (
+                        <td
+                          key={col.key}
+                          className={`group/cell border border-[hsl(0,0%,85%)] p-0 relative ${
+                            isInFillRange
+                              ? "bg-primary/30 ring-1 ring-primary ring-inset"
+                              : isSelected
+                              ? "bg-primary/20 ring-2 ring-primary ring-inset"
+                              : col.isOutput
+                              ? "bg-blue-50/50 dark:bg-blue-950/10"
+                              : ""
+                          }`}
+                          style={{ width: col.width }}
+                          onMouseDown={e => handleCellMouseDown(e, rowIdx, colIdx)}
+                          onMouseEnter={() => handleCellMouseEnter(rowIdx, colIdx)}
+                          onMouseUp={() => { if (fillHandleDrag) { /* handled by global */ } }}
+                        >
+                          {col.key === "mode" ? (
+                            <div className="w-full h-full px-2 py-1.5 flex items-center" data-row={rowIdx} data-col={colIdx}>
+                              <ModeSwatch value={row.mode} onChange={m => handleModeChange(row.id, m)} lang={lang} xs />
+                            </div>
+                          ) : (
+                            <input
+                              type="text"
+                              value={value}
+                              data-row={rowIdx}
+                              data-col={colIdx}
+                              onChange={e => handleCellChange(row.id, col.key, e.target.value)}
+                              onPaste={e => handleCellPaste(e, rowIdx, colIdx, col.key)}
+                              onKeyDown={e => handleKeyNavigation(e, rowIdx, colIdx)}
+                              onFocus={() => {
+                                if (!selection.some(s => s.row === rowIdx && s.col === colIdx)) {
+                                  setSelection([{ row: rowIdx, col: colIdx }]);
+                                  setSelectionStart({ row: rowIdx, col: colIdx });
+                                }
+                              }}
+                              className="w-full px-2 py-1.5 bg-transparent border-none outline-none focus:ring-2 focus:ring-primary/50 text-sm"
+                              style={{ minWidth: 0 }}
+                            />
+                          )}
+
+                          {/* Fill handle (black cube) */}
+                          {value && rowIdx < rows.length - 1 && (
+                            <div
+                              className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-primary cursor-crosshair z-20 border border-background opacity-0 group-hover/cell:opacity-100"
+                              onMouseDown={e => handleFillHandleMouseDown(e, rowIdx, colIdx)}
+                              onDoubleClick={e => { e.stopPropagation(); handleFillDoubleClick(rowIdx, colIdx); }}
+                              title={lang === "DE" ? "Ziehen zum Ausfüllen" : "Drag to fill"}
+                            />
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+
+                {/* Add row */}
+                <tr>
+                  <td
+                    colSpan={COLUMNS.length + 1}
+                    className="border border-[hsl(0,0%,85%)] px-3 py-1.5 text-center cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/30 text-xs transition-colors select-none"
+                    onClick={() => {
+                      setRows(prev => [...prev, createEmptyRow(defaultMode)]);
+                      setRowCountInput(String(rows.length + 1));
+                    }}
+                  >
+                    + {lang === "DE" ? "Zeile hinzufügen" : "Add row"}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </div>
   );
