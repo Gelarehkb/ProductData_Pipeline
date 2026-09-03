@@ -134,12 +134,20 @@ function buildNamingCandidates(row: ClothRow, catalog: JtlCatalogRow[]): NamingC
   const wg = (row.WarenGruppe || "").trim().toLowerCase();
   const nameWords = new Set(getBaseNameForNaming(row).toLowerCase().split(/\s+/).filter(w => w.length >= 3));
 
+  // Every new order row is a purchasable child variant (a specific
+  // color+size), never a Vaterartikel — so a Vater row is never the right
+  // shape to imitate: its Artikelnummer/Artikelname omit the size entirely,
+  // and its HAN is a placeholder like "Vater" (or "Vater DC"), not a real
+  // supplier code. Left in, it corrupts exactly the HAN pattern-matching
+  // this function exists to feed the naming AI.
+  const childCatalog = catalog.filter(c => c.vaterartikel.trim() !== "1");
+
   // AI classification can land one bucket off (e.g. "Kleidung Mode" vs.
   // "Kleidung Basics" for the same wool tights) — a same-first-word match
   // ("Kleidung ...") still counts for something so a slightly-wrong
   // Warengruppe doesn't throw away every relevant example.
   const wgFirstWord = wg.split(/\s+/)[0] || "";
-  const scored = catalog.map(c => {
+  const scored = childCatalog.map(c => {
     const cWg = c.warengruppe.trim().toLowerCase();
     const wgMatch = wg !== "" && cWg === wg;
     const wgBroadMatch = !wgMatch && wgFirstWord !== "" && cWg.split(/\s+/)[0] === wgFirstWord;
@@ -162,7 +170,7 @@ function buildNamingCandidates(row: ClothRow, catalog: JtlCatalogRow[]): NamingC
   } else {
     // Nothing scored — still give the model a small style sample instead of
     // silently skipping the AI call and falling back to the blind formula.
-    examples = catalog.slice(0, 3);
+    examples = childCatalog.slice(0, 3);
     matchTier = "generic";
   }
 
