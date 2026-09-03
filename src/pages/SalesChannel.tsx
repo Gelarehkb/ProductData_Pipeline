@@ -4,9 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { ArrowLeft, Upload, Download, AlertTriangle, CheckCircle2, FileSpreadsheet } from "lucide-react";
+import { ArrowLeft, Upload, Download, AlertTriangle, CheckCircle2, FileSpreadsheet, Globe } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { parseDelimitedText, detectDelimiter, decodeTextBuffer } from "@/lib/csvParsing";
+import { type Lang, t } from "@/lib/translations";
 
 // Fully self-contained, like Discounts.tsx: its own parsing, its own export,
 // no shared state with the other pages. Pulls only Interner Schlüssel +
@@ -47,8 +48,22 @@ function todayDMY(): string {
   return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}`;
 }
 
+const ToggleField = ({
+  label, checked, onCheckedChange, offLabel, onLabel,
+}: { label: string; checked: boolean; onCheckedChange: (v: boolean) => void; offLabel: string; onLabel: string }) => (
+  <div className="space-y-1">
+    <Label className="text-xs block">{label}</Label>
+    <div className="flex items-center gap-1.5">
+      <span className={`text-xs ${!checked ? "font-semibold text-foreground" : "text-muted-foreground"}`}>{offLabel}</span>
+      <Switch checked={checked} onCheckedChange={onCheckedChange} />
+      <span className={`text-xs ${checked ? "font-semibold text-foreground" : "text-muted-foreground"}`}>{onLabel}</span>
+    </div>
+  </div>
+);
+
 export default function SalesChannel() {
   const { toast } = useToast();
+  const [lang, setLang] = useState<Lang>("DE");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [fileName, setFileName] = useState("");
@@ -91,8 +106,10 @@ export default function SalesChannel() {
     setMissingColumns(missing);
 
     toast({
-      title: "Datei geladen",
-      description: `${projectedRows.length} Zeile(n) aus "${loadedFileName}".`,
+      title: lang === "DE" ? "Datei geladen" : "File loaded",
+      description: lang === "DE"
+        ? `${projectedRows.length} Zeile(n) aus "${loadedFileName}".`
+        : `${projectedRows.length} row(s) from "${loadedFileName}".`,
     });
   };
 
@@ -108,7 +125,7 @@ export default function SalesChannel() {
         const delimiter = detectDelimiter(text);
         const all = parseDelimitedText(text, delimiter).filter(r => r.some(c => c.trim() !== ""));
         if (all.length < 1) {
-          toast({ title: "Keine Daten", description: "Die Datei enthält keine verwertbaren Zeilen.", variant: "destructive" });
+          toast({ title: t("noData", lang), description: lang === "DE" ? "Die Datei enthält keine verwertbaren Zeilen." : "The file has no usable rows.", variant: "destructive" });
           return;
         }
         parsedHeaders = all[0].map(h => h.trim());
@@ -119,7 +136,7 @@ export default function SalesChannel() {
         const ws = wb.Sheets[wb.SheetNames[0]];
         const aoa = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, defval: "", blankrows: false, raw: false });
         if (aoa.length < 1) {
-          toast({ title: "Keine Daten", description: "Die Datei enthält keine verwertbaren Zeilen.", variant: "destructive" });
+          toast({ title: t("noData", lang), description: lang === "DE" ? "Die Datei enthält keine verwertbaren Zeilen." : "The file has no usable rows.", variant: "destructive" });
           return;
         }
         parsedHeaders = (aoa[0] as string[]).map(h => String(h ?? "").trim());
@@ -135,14 +152,14 @@ export default function SalesChannel() {
 
       loadParsedTable(parsedHeaders, parsedRows, file.name);
     } catch (err) {
-      toast({ title: "Fehler beim Importieren", description: String(err), variant: "destructive" });
+      toast({ title: lang === "DE" ? "Fehler beim Importieren" : "Import failed", description: String(err), variant: "destructive" });
     }
   };
 
   const handleDownload = () => {
     if (!hasData) return;
     if (dateInvalid) {
-      toast({ title: "Ungültiges Datum", description: "Bitte 'Neu im Sortiment seit' im Format TT.MM.JJJJ angeben.", variant: "destructive" });
+      toast({ title: lang === "DE" ? "Ungültiges Datum" : "Invalid date", description: lang === "DE" ? "Bitte 'Neu im Sortiment seit' im Format TT.MM.JJJJ angeben." : "Please enter 'New in assortment since' in DD.MM.YYYY format.", variant: "destructive" });
       return;
     }
     const allHeaders = [...SOURCE_COLUMNS.map(c => c.label), ...NEW_COLUMNS];
@@ -163,28 +180,29 @@ export default function SalesChannel() {
     URL.revokeObjectURL(url);
   };
 
-  const ToggleField = ({
-    label, checked, onCheckedChange, offLabel, onLabel,
-  }: { label: string; checked: boolean; onCheckedChange: (v: boolean) => void; offLabel: string; onLabel: string }) => (
-    <div className="space-y-1">
-      <Label className="text-xs block">{label}</Label>
-      <div className="flex items-center gap-1.5">
-        <span className={`text-xs ${!checked ? "font-semibold text-foreground" : "text-muted-foreground"}`}>{offLabel}</span>
-        <Switch checked={checked} onCheckedChange={onCheckedChange} />
-        <span className={`text-xs ${checked ? "font-semibold text-foreground" : "text-muted-foreground"}`}>{onLabel}</span>
-      </div>
-    </div>
-  );
-
   return (
     <div className="min-h-screen bg-background p-6">
       <div className="max-w-[1400px] mx-auto">
-        <div className="flex items-center gap-3 mb-6">
-          <a href="/" className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors">
-            <ArrowLeft className="h-4 w-4" />
-            Zurück
-          </a>
-          <h1 className="text-2xl font-bold text-foreground">Sale Channel</h1>
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <a href="/" className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors">
+              <ArrowLeft className="h-4 w-4" />
+              {lang === "DE" ? "Zurück" : "Back"}
+            </a>
+            <h1 className="text-2xl font-bold text-foreground">Sale Channel</h1>
+            <span className="text-xs text-muted-foreground">
+              {lang === "DE" ? "Verkaufskanal-Flags für den JTL-Import setzen" : "Set sales-channel flags for JTL import"}
+            </span>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={() => setLang(prev => prev === "DE" ? "EN" : "DE")}
+          >
+            <Globe className="h-4 w-4" />
+            {lang === "DE" ? "EN" : "DE"}
+          </Button>
         </div>
 
         {/* ── Upload ──────────────────────────────────────────────────────── */}
@@ -202,16 +220,16 @@ export default function SalesChannel() {
           />
           <Button variant="outline" size="sm" className="gap-1.5 shrink-0" onClick={() => fileInputRef.current?.click()}>
             <Upload className="h-4 w-4" />
-            Datei hochladen (CSV/Excel)
+            {lang === "DE" ? "Datei hochladen (CSV/Excel)" : "Upload file (CSV/Excel)"}
           </Button>
           {fileName ? (
             <span className="text-sm text-muted-foreground flex items-center gap-2 min-w-0">
               <FileSpreadsheet className="h-4 w-4 shrink-0" />
               <span className="font-medium text-foreground truncate max-w-[300px]" title={fileName}>{fileName}</span>
-              <span className="shrink-0">{rows.length.toLocaleString("de-DE")} Zeilen</span>
+              <span className="shrink-0">{rows.length.toLocaleString(lang === "DE" ? "de-DE" : "en-US")} {lang === "DE" ? "Zeilen" : "rows"}</span>
             </span>
           ) : (
-            <span className="text-sm text-muted-foreground">Noch keine Datei geladen.</span>
+            <span className="text-sm text-muted-foreground">{lang === "DE" ? "Noch keine Datei geladen." : "No file loaded yet."}</span>
           )}
         </div>
 
@@ -226,14 +244,14 @@ export default function SalesChannel() {
               <div className="flex items-start gap-2">
                 <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
                 <div>
-                  <p className="font-medium">Erwartete Spalten fehlen (Verarbeitung läuft trotzdem weiter):</p>
+                  <p className="font-medium">{lang === "DE" ? "Erwartete Spalten fehlen (Verarbeitung läuft trotzdem weiter):" : "Expected columns are missing (processing continues anyway):"}</p>
                   <p className="mt-0.5">{missingColumns.join(", ")}</p>
                 </div>
               </div>
             ) : (
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="h-4 w-4 shrink-0" />
-                Alle erwarteten Spalten wurden erkannt.
+                {lang === "DE" ? "Alle erwarteten Spalten wurden erkannt." : "All expected columns were detected."}
               </div>
             )}
           </div>
@@ -244,14 +262,14 @@ export default function SalesChannel() {
             {/* ── Global toggle fields — applied live to every row ────────────── */}
             <div className="bg-card border border-border rounded-lg p-4 mb-4">
               <div className="flex flex-wrap items-end gap-5">
-                <ToggleField label="Überverkäufe möglich" checked={ueberverkaufMoeglich} onCheckedChange={setUeberverkaufMoeglich} offLabel="N" onLabel="Y" />
-                <ToggleField label="Überverkauf Plattform HFK-POS-WIEN" checked={ueberverkaufHfk} onCheckedChange={setUeberverkaufHfk} offLabel="False" onLabel="True" />
-                <ToggleField label="Überverkauf Plattform JTL-Shop 5" checked={ueberverkaufJtl} onCheckedChange={setUeberverkaufJtl} offLabel="False" onLabel="True" />
-                <ToggleField label="Verkaufskanal HFK-POS-WIEN aktiv" checked={kanalHfkAktiv} onCheckedChange={setKanalHfkAktiv} offLabel="N" onLabel="Y" />
-                <ToggleField label="Verkaufskanal JTL-Shop 5 aktiv" checked={kanalJtlAktiv} onCheckedChange={setKanalJtlAktiv} offLabel="N" onLabel="Y" />
-                <ToggleField label="Neu im Sortiment" checked={neuImSortiment} onCheckedChange={setNeuImSortiment} offLabel="N" onLabel="Y" />
+                <ToggleField label={lang === "DE" ? "Überverkäufe möglich" : "Overselling possible"} checked={ueberverkaufMoeglich} onCheckedChange={setUeberverkaufMoeglich} offLabel="N" onLabel="Y" />
+                <ToggleField label={lang === "DE" ? "Überverkauf Plattform HFK-POS-WIEN" : "Overselling platform HFK-POS-WIEN"} checked={ueberverkaufHfk} onCheckedChange={setUeberverkaufHfk} offLabel="False" onLabel="True" />
+                <ToggleField label={lang === "DE" ? "Überverkauf Plattform JTL-Shop 5" : "Overselling platform JTL-Shop 5"} checked={ueberverkaufJtl} onCheckedChange={setUeberverkaufJtl} offLabel="False" onLabel="True" />
+                <ToggleField label={lang === "DE" ? "Verkaufskanal HFK-POS-WIEN aktiv" : "Sales channel HFK-POS-WIEN active"} checked={kanalHfkAktiv} onCheckedChange={setKanalHfkAktiv} offLabel="N" onLabel="Y" />
+                <ToggleField label={lang === "DE" ? "Verkaufskanal JTL-Shop 5 aktiv" : "Sales channel JTL-Shop 5 active"} checked={kanalJtlAktiv} onCheckedChange={setKanalJtlAktiv} offLabel="N" onLabel="Y" />
+                <ToggleField label={lang === "DE" ? "Neu im Sortiment" : "New in assortment"} checked={neuImSortiment} onCheckedChange={setNeuImSortiment} offLabel="N" onLabel="Y" />
                 <div className="space-y-1">
-                  <Label htmlFor="neuSeit" className="text-xs">Neu im Sortiment seit</Label>
+                  <Label htmlFor="neuSeit" className="text-xs">{lang === "DE" ? "Neu im Sortiment seit" : "New in assortment since"}</Label>
                   <Input
                     id="neuSeit"
                     value={neuSeit}
@@ -262,7 +280,7 @@ export default function SalesChannel() {
                 </div>
                 <Button onClick={handleDownload} size="sm" className="gap-1.5">
                   <Download className="h-3.5 w-3.5" />
-                  CSV herunterladen
+                  {t("csvExport", lang)}
                 </Button>
               </div>
             </div>
@@ -288,15 +306,15 @@ export default function SalesChannel() {
                   </thead>
                   <tbody>
                     {rows.map((row, rowIndex) => (
-                      <tr key={rowIndex} className={rowIndex % 2 === 0 ? "bg-[hsl(0,0%,98%)]" : "bg-[hsl(0,0%,94%)]"}>
-                        <td className="border border-[hsl(0,0%,88%)] px-2 py-1 text-xs text-muted-foreground">{rowIndex + 1}</td>
+                      <tr key={rowIndex} className={rowIndex % 2 === 0 ? "bg-[hsl(0,0%,96%)]" : "bg-[hsl(0,0%,92%)]"}>
+                        <td className="border border-[hsl(0,0%,85%)] px-2 py-1 text-xs text-muted-foreground">{rowIndex + 1}</td>
                         {row.map((cell, colIndex) => (
-                          <td key={colIndex} className="border border-[hsl(0,0%,88%)] px-2 py-1 whitespace-nowrap">
+                          <td key={colIndex} className="border border-[hsl(0,0%,85%)] px-2 py-1 whitespace-nowrap">
                             {cell}
                           </td>
                         ))}
                         {extraValuesRow.map((v, i) => (
-                          <td key={i} className="border border-[hsl(0,0%,88%)] px-2 py-1 whitespace-nowrap bg-blue-50/50 dark:bg-blue-950/10">
+                          <td key={i} className="border border-[hsl(0,0%,85%)] px-2 py-1 whitespace-nowrap bg-blue-50/50 dark:bg-blue-950/10">
                             {v}
                           </td>
                         ))}

@@ -3,7 +3,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Download, Plus, Trash2 } from "lucide-react";
+import { Download, Plus, Trash2, ArrowLeft, Globe } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { type Lang, t } from "@/lib/translations";
 
 interface ClothRow {
   id: string;
@@ -93,6 +95,8 @@ const buildRow = (
 };
 
 const ArtikelAnlegen = () => {
+  const { toast } = useToast();
+  const [lang, setLang] = useState<Lang>("DE");
   const [kurzl, setKurzl] = useState("");
   const [hersteller, setHersteller] = useState("");
   const [auf, setAuf] = useState("2");
@@ -172,7 +176,10 @@ const ArtikelAnlegen = () => {
     });
 
     // Convert to CSV
-    if (outputRows.length === 0) return;
+    if (outputRows.length === 0) {
+      toast({ title: t("noData", lang), description: t("noDataDesc", lang), variant: "destructive" });
+      return;
+    }
 
     const headers = Object.keys(outputRows[0]);
     const escCsv = (v: any) => {
@@ -202,48 +209,70 @@ const ArtikelAnlegen = () => {
   const columns: { key: keyof ClothRow; label: string; width: string }[] = [
     { key: "ClothName", label: "ClothName", width: "180px" },
     { key: "ClothCode", label: "ClothCode", width: "120px" },
-    { key: "color", label: "color", width: "100px" },
-    { key: "Size", label: "Size", width: "80px" },
-    { key: "EAN", label: "EAN", width: "140px" },
-    { key: "HAN", label: "HAN", width: "120px" },
-    { key: "EK", label: "EK", width: "80px" },
-    { key: "VK", label: "VK", width: "80px" },
-    { key: "Menge", label: "Menge", width: "80px" },
+    { key: "color", label: t("colColor", lang), width: "100px" },
+    { key: "Size", label: t("colSize", lang), width: "80px" },
+    { key: "EAN", label: t("colEAN", lang), width: "140px" },
+    { key: "HAN", label: t("colHAN", lang), width: "120px" },
+    { key: "EK", label: t("colEK", lang), width: "80px" },
+    { key: "VK", label: t("colVK", lang), width: "80px" },
+    { key: "Menge", label: t("colMenge", lang), width: "80px" },
   ];
 
   return (
     <div className="min-h-screen bg-background p-6">
       <div className="max-w-[1400px] mx-auto">
-        <h1 className="text-2xl font-bold text-foreground mb-6">Artikel Anlegen</h1>
-        
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <a href="/" className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors">
+              <ArrowLeft className="h-4 w-4" />
+              {lang === "DE" ? "Zurück" : "Back"}
+            </a>
+            <h1 className="text-2xl font-bold text-foreground">{t("pageTitle", lang)}</h1>
+            <span className="text-xs text-muted-foreground">
+              {lang === "DE" ? "Einzelne Artikel manuell anlegen und als GESAMT-CSV exportieren" : "Manually create individual articles and export as a GESAMT CSV"}
+            </span>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={() => setLang(prev => prev === "DE" ? "EN" : "DE")}
+          >
+            <Globe className="h-4 w-4" />
+            {lang === "DE" ? "EN" : "DE"}
+          </Button>
+        </div>
+
         {/* Input Controls */}
         <div className="bg-card border border-border rounded-lg p-4 mb-6">
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="kurzl">KURZL</Label>
-              <Input 
-                id="kurzl" 
-                value={kurzl} 
+          <div className="flex flex-wrap items-end gap-4">
+            <div className="space-y-1">
+              <Label htmlFor="kurzl" className="text-xs">{t("kurzl", lang)}</Label>
+              <Input
+                id="kurzl"
+                value={kurzl}
                 onChange={(e) => setKurzl(e.target.value)}
                 placeholder="z.B. SNU FS26"
+                className="w-36"
               />
             </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="hersteller">Hersteller</Label>
-              <Input 
-                id="hersteller" 
-                value={hersteller} 
+
+            <div className="space-y-1">
+              <Label htmlFor="hersteller" className="text-xs">{t("hersteller", lang)}</Label>
+              <Input
+                id="hersteller"
+                value={hersteller}
                 onChange={(e) => setHersteller(e.target.value)}
                 placeholder="z.B. SNUG"
+                className="w-36"
               />
             </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="auf">AUF</Label>
+
+            <div className="space-y-1">
+              <Label htmlFor="auf" className="text-xs">{t("auf", lang)}</Label>
               <Select value={auf} onValueChange={setAuf}>
-                <SelectTrigger id="auf">
-                  <SelectValue placeholder="Wählen..." />
+                <SelectTrigger id="auf" className="w-20">
+                  <SelectValue placeholder={t("choose", lang)} />
                 </SelectTrigger>
                 <SelectContent>
                   {Array.from({ length: 10 }, (_, i) => (
@@ -254,12 +283,12 @@ const ArtikelAnlegen = () => {
                 </SelectContent>
               </Select>
             </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="ab">AB</Label>
+
+            <div className="space-y-1">
+              <Label htmlFor="ab" className="text-xs">{t("ab", lang)}</Label>
               <Select value={ab} onValueChange={setAb}>
-                <SelectTrigger id="ab">
-                  <SelectValue placeholder="Wählen..." />
+                <SelectTrigger id="ab" className="w-20">
+                  <SelectValue placeholder={t("choose", lang)} />
                 </SelectTrigger>
                 <SelectContent>
                   {Array.from({ length: 10 }, (_, i) => (
@@ -270,15 +299,16 @@ const ArtikelAnlegen = () => {
                 </SelectContent>
               </Select>
             </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="lieferzeit">Lieferzeit (Tage)</Label>
-              <Input 
-                id="lieferzeit" 
+
+            <div className="space-y-1">
+              <Label htmlFor="lieferzeit" className="text-xs">{t("lieferzeit", lang)}</Label>
+              <Input
+                id="lieferzeit"
                 type="number"
-                value={lieferzeit} 
+                value={lieferzeit}
                 onChange={(e) => setLieferzeit(e.target.value)}
                 placeholder="14"
+                className="w-24"
               />
             </div>
           </div>
@@ -289,24 +319,24 @@ const ArtikelAnlegen = () => {
           <div className="overflow-x-auto">
             <table className="w-full border-collapse">
               <thead>
-                <tr className="bg-[hsl(320,70%,75%)]">
+                <tr className="bg-[hsl(0,0%,85%)]">
                   {columns.map(col => (
-                    <th 
+                    <th
                       key={col.key}
-                      className="border border-[hsl(320,60%,65%)] px-2 py-2 text-left text-sm font-semibold text-foreground"
+                      className="border border-[hsl(0,0%,75%)] px-2 py-2 text-left text-sm font-semibold text-foreground"
                       style={{ minWidth: col.width }}
                     >
                       {col.label}
                     </th>
                   ))}
-                  <th className="border border-[hsl(320,60%,65%)] px-2 py-2 w-10 bg-[hsl(320,70%,75%)]"></th>
+                  <th className="border border-[hsl(0,0%,75%)] px-2 py-2 w-10 bg-[hsl(0,0%,85%)]"></th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row, rowIndex) => (
-                  <tr key={row.id} className={rowIndex % 2 === 0 ? "bg-[hsl(320,70%,92%)]" : "bg-[hsl(320,70%,88%)]"}>
+                  <tr key={row.id} className={rowIndex % 2 === 0 ? "bg-[hsl(0,0%,96%)]" : "bg-[hsl(0,0%,92%)]"}>
                     {columns.map(col => (
-                      <td key={col.key} className="border border-[hsl(320,60%,80%)] p-0">
+                      <td key={col.key} className="border border-[hsl(0,0%,85%)] p-0">
                         <input
                           type="text"
                           value={row[col.key]}
@@ -315,10 +345,10 @@ const ArtikelAnlegen = () => {
                         />
                       </td>
                     ))}
-                    <td className="border border-[hsl(320,60%,80%)] p-1">
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
+                    <td className="border border-[hsl(0,0%,85%)] p-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         className="h-6 w-6 text-destructive hover:text-destructive"
                         onClick={() => deleteRow(row.id)}
                       >
@@ -336,11 +366,11 @@ const ArtikelAnlegen = () => {
         <div className="flex gap-3">
           <Button onClick={addRow} variant="outline" className="gap-2">
             <Plus className="h-4 w-4" />
-            Zeile hinzufügen
+            {lang === "DE" ? "Zeile hinzufügen" : "Add row"}
           </Button>
           <Button onClick={processAndDownload} className="gap-2">
             <Download className="h-4 w-4" />
-            CSV exportieren
+            {t("csvExport", lang)}
           </Button>
         </div>
       </div>

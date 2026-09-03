@@ -3,8 +3,9 @@ import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ArrowLeft, Upload, Download, AlertTriangle, CheckCircle2, FileSpreadsheet } from "lucide-react";
+import { ArrowLeft, Upload, Download, AlertTriangle, CheckCircle2, FileSpreadsheet, Globe } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { type Lang, t } from "@/lib/translations";
 
 // This page is fully self-contained: its own parsing, its own export, no shared
 // state or logic with the other pages. Nothing here is imported by, or imports
@@ -97,6 +98,7 @@ function escapeCsvCell(v: string): string {
 
 export default function Discounts() {
   const { toast } = useToast();
+  const [lang, setLang] = useState<Lang>("DE");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [fileName, setFileName] = useState("");
@@ -129,8 +131,10 @@ export default function Discounts() {
     setMissingColumns(missing);
 
     toast({
-      title: "Datei geladen",
-      description: `${projectedRows.length} Zeile(n) aus "${loadedFileName}".`,
+      title: lang === "DE" ? "Datei geladen" : "File loaded",
+      description: lang === "DE"
+        ? `${projectedRows.length} Zeile(n) aus "${loadedFileName}".`
+        : `${projectedRows.length} row(s) from "${loadedFileName}".`,
     });
   };
 
@@ -151,7 +155,7 @@ export default function Discounts() {
         const delimiter = detectDelimiter(text);
         const all = parseDelimitedText(text, delimiter);
         if (all.length < 1) {
-          toast({ title: "Keine Daten", description: "Die Datei enthält keine verwertbaren Zeilen.", variant: "destructive" });
+          toast({ title: t("noData", lang), description: lang === "DE" ? "Die Datei enthält keine verwertbaren Zeilen." : "The file has no usable rows.", variant: "destructive" });
           return;
         }
         parsedHeaders = all[0].map(h => h.trim());
@@ -162,7 +166,7 @@ export default function Discounts() {
         const ws = wb.Sheets[wb.SheetNames[0]];
         const aoa = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, defval: "", blankrows: false, raw: false });
         if (aoa.length < 1) {
-          toast({ title: "Keine Daten", description: "Die Datei enthält keine verwertbaren Zeilen.", variant: "destructive" });
+          toast({ title: t("noData", lang), description: lang === "DE" ? "Die Datei enthält keine verwertbaren Zeilen." : "The file has no usable rows.", variant: "destructive" });
           return;
         }
         parsedHeaders = (aoa[0] as string[]).map(h => String(h ?? "").trim());
@@ -179,7 +183,7 @@ export default function Discounts() {
 
       loadParsedTable(parsedHeaders, parsedRows, file.name);
     } catch (err) {
-      toast({ title: "Fehler beim Importieren", description: String(err), variant: "destructive" });
+      toast({ title: lang === "DE" ? "Fehler beim Importieren" : "Import failed", description: String(err), variant: "destructive" });
     }
   };
 
@@ -193,8 +197,8 @@ export default function Discounts() {
     if (globalSonderpreis.trim() !== "") {
       if (!hasPct) {
         toast({
-          title: "Ungültiger Rabatt",
-          description: "Bitte einen Prozentsatz zwischen 0 und 100 eingeben (z.B. 5).",
+          title: lang === "DE" ? "Ungültiger Rabatt" : "Invalid discount",
+          description: lang === "DE" ? "Bitte einen Prozentsatz zwischen 0 und 100 eingeben (z.B. 5)." : "Please enter a percentage between 0 and 100 (e.g. 5).",
           variant: "destructive",
         });
         return;
@@ -219,8 +223,10 @@ export default function Discounts() {
       lagerbestand: globalLager,
     })));
     toast({
-      title: "Übernommen",
-      description: `Werte wurden auf alle ${rows.length} Zeilen angewendet.`,
+      title: lang === "DE" ? "Übernommen" : "Applied",
+      description: lang === "DE"
+        ? `Werte wurden auf alle ${rows.length} Zeilen angewendet.`
+        : `Values were applied to all ${rows.length} rows.`,
     });
   };
 
@@ -255,12 +261,26 @@ export default function Discounts() {
   return (
     <div className="min-h-screen bg-background p-6">
       <div className="max-w-[1400px] mx-auto">
-        <div className="flex items-center gap-3 mb-6">
-          <a href="/" className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors">
-            <ArrowLeft className="h-4 w-4" />
-            Zurück
-          </a>
-          <h1 className="text-2xl font-bold text-foreground">Discounts</h1>
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <a href="/" className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors">
+              <ArrowLeft className="h-4 w-4" />
+              {lang === "DE" ? "Zurück" : "Back"}
+            </a>
+            <h1 className="text-2xl font-bold text-foreground">Discounts</h1>
+            <span className="text-xs text-muted-foreground">
+              {lang === "DE" ? "Sonderpreise für den JTL-Import vorbereiten" : "Prepare special-price discounts for JTL import"}
+            </span>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={() => setLang(prev => prev === "DE" ? "EN" : "DE")}
+          >
+            <Globe className="h-4 w-4" />
+            {lang === "DE" ? "EN" : "DE"}
+          </Button>
         </div>
 
         {/* ── Upload ──────────────────────────────────────────────────────── */}
@@ -278,16 +298,16 @@ export default function Discounts() {
           />
           <Button variant="outline" size="sm" className="gap-1.5 shrink-0" onClick={() => fileInputRef.current?.click()}>
             <Upload className="h-4 w-4" />
-            Datei hochladen (CSV/Excel)
+            {lang === "DE" ? "Datei hochladen (CSV/Excel)" : "Upload file (CSV/Excel)"}
           </Button>
           {fileName ? (
             <span className="text-sm text-muted-foreground flex items-center gap-2 min-w-0">
               <FileSpreadsheet className="h-4 w-4 shrink-0" />
               <span className="font-medium text-foreground truncate max-w-[300px]" title={fileName}>{fileName}</span>
-              <span className="shrink-0">{rows.length.toLocaleString("de-DE")} Zeilen</span>
+              <span className="shrink-0">{rows.length.toLocaleString(lang === "DE" ? "de-DE" : "en-US")} {lang === "DE" ? "Zeilen" : "rows"}</span>
             </span>
           ) : (
-            <span className="text-sm text-muted-foreground">Noch keine Datei geladen.</span>
+            <span className="text-sm text-muted-foreground">{lang === "DE" ? "Noch keine Datei geladen." : "No file loaded yet."}</span>
           )}
         </div>
 
@@ -302,14 +322,14 @@ export default function Discounts() {
               <div className="flex items-start gap-2">
                 <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
                 <div>
-                  <p className="font-medium">Erwartete Spalten fehlen (Verarbeitung läuft trotzdem weiter):</p>
+                  <p className="font-medium">{lang === "DE" ? "Erwartete Spalten fehlen (Verarbeitung läuft trotzdem weiter):" : "Expected columns are missing (processing continues anyway):"}</p>
                   <p className="mt-0.5">{missingColumns.join(", ")}</p>
                 </div>
               </div>
             ) : (
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="h-4 w-4 shrink-0" />
-                Alle erwarteten Spalten wurden erkannt.
+                {lang === "DE" ? "Alle erwarteten Spalten wurden erkannt." : "All expected columns were detected."}
               </div>
             )}
           </div>
@@ -321,19 +341,21 @@ export default function Discounts() {
             <div className="bg-card border border-border rounded-lg p-4 mb-4">
               <div className="flex flex-wrap items-end gap-4">
                 <div className="space-y-1">
-                  <Label htmlFor="sonderpreis" className="text-xs">Sonderpreis-Rabatt %</Label>
+                  <Label htmlFor="sonderpreis" className="text-xs">{lang === "DE" ? "Sonderpreis-Rabatt %" : "Special-price discount %"}</Label>
                   <Input
                     id="sonderpreis"
                     value={globalSonderpreis}
                     onChange={(e) => setGlobalSonderpreis(e.target.value)}
                     placeholder="z.B. 5"
-                    title="Berechnet den reduzierten Preis je Zeile für 'Sonderpreis Endkunden brutto': Brutto-VK * (1 - Rabatt%), z.B. 5% Rabatt auf 49,99 → 47,49."
+                    title={lang === "DE"
+                      ? "Berechnet den reduzierten Preis je Zeile für 'Sonderpreis Endkunden brutto': Brutto-VK * (1 - Rabatt%), z.B. 5% Rabatt auf 49,99 → 47,49."
+                      : "Computes the reduced price per row for 'Sonderpreis Endkunden brutto': Brutto-VK * (1 - discount%), e.g. 5% off 49.99 → 47.49."}
                     className="w-32"
                   />
                   <p className="text-[11px] text-muted-foreground">= Brutto-VK × (1 − %)</p>
                 </div>
                 <div className="space-y-1">
-                  <Label htmlFor="startdatum" className="text-xs">Startdatum</Label>
+                  <Label htmlFor="startdatum" className="text-xs">{lang === "DE" ? "Startdatum" : "Start date"}</Label>
                   <Input
                     id="startdatum"
                     value={globalStart}
@@ -341,10 +363,10 @@ export default function Discounts() {
                     placeholder="TT.MM.JJJJ"
                     className={`w-32 ${startInvalid ? "border-destructive" : ""}`}
                   />
-                  <p className="text-[11px] text-muted-foreground">Format: TT.MM.JJJJ</p>
+                  <p className="text-[11px] text-muted-foreground">{lang === "DE" ? "Format: TT.MM.JJJJ" : "Format: DD.MM.YYYY"}</p>
                 </div>
                 <div className="space-y-1">
-                  <Label htmlFor="enddatum" className="text-xs">Enddatum</Label>
+                  <Label htmlFor="enddatum" className="text-xs">{lang === "DE" ? "Enddatum" : "End date"}</Label>
                   <Input
                     id="enddatum"
                     value={globalEnd}
@@ -352,24 +374,24 @@ export default function Discounts() {
                     placeholder="TT.MM.JJJJ"
                     className={`w-32 ${endInvalid ? "border-destructive" : ""}`}
                   />
-                  <p className="text-[11px] text-muted-foreground">Format: TT.MM.JJJJ</p>
+                  <p className="text-[11px] text-muted-foreground">{lang === "DE" ? "Format: TT.MM.JJJJ" : "Format: DD.MM.YYYY"}</p>
                 </div>
                 <div className="space-y-1">
-                  <Label htmlFor="lagerbestand" className="text-xs">Bis Anzahl im Lager kleiner als</Label>
+                  <Label htmlFor="lagerbestand" className="text-xs">{lang === "DE" ? "Bis Anzahl im Lager kleiner als" : "Until stock count below"}</Label>
                   <Input
                     id="lagerbestand"
                     value={globalLager}
                     onChange={(e) => setGlobalLager(e.target.value)}
-                    placeholder="optional"
+                    placeholder={lang === "DE" ? "optional" : "optional"}
                     className="w-36"
                   />
                 </div>
                 <Button onClick={handleApplyAll} size="sm" className="gap-1.5">
-                  Auf alle Zeilen anwenden
+                  {lang === "DE" ? "Auf alle Zeilen anwenden" : "Apply to all rows"}
                 </Button>
                 <Button onClick={handleDownload} variant="outline" size="sm" className="gap-1.5">
                   <Download className="h-3.5 w-3.5" />
-                  CSV herunterladen
+                  {t("csvExport", lang)}
                 </Button>
               </div>
             </div>
@@ -397,18 +419,18 @@ export default function Discounts() {
                     {rows.map((row, rowIndex) => {
                       const extra = extraValues[rowIndex] ?? emptyExtra();
                       return (
-                        <tr key={rowIndex} className={rowIndex % 2 === 0 ? "bg-[hsl(0,0%,98%)]" : "bg-[hsl(0,0%,94%)]"}>
-                          <td className="border border-[hsl(0,0%,88%)] px-2 py-1 text-xs text-muted-foreground">{rowIndex + 1}</td>
+                        <tr key={rowIndex} className={rowIndex % 2 === 0 ? "bg-[hsl(0,0%,96%)]" : "bg-[hsl(0,0%,92%)]"}>
+                          <td className="border border-[hsl(0,0%,85%)] px-2 py-1 text-xs text-muted-foreground">{rowIndex + 1}</td>
                           {row.map((cell, colIndex) => (
-                            <td key={colIndex} className="border border-[hsl(0,0%,88%)] px-2 py-1 whitespace-nowrap">
+                            <td key={colIndex} className="border border-[hsl(0,0%,85%)] px-2 py-1 whitespace-nowrap">
                               {cell}
                             </td>
                           ))}
-                          <td className="border border-[hsl(0,0%,88%)] px-2 py-1 whitespace-nowrap bg-blue-50/50 dark:bg-blue-950/10">{extra.sonderpreis}</td>
-                          <td className="border border-[hsl(0,0%,88%)] px-2 py-1 whitespace-nowrap bg-blue-50/50 dark:bg-blue-950/10">{extra.startdatum}</td>
-                          <td className="border border-[hsl(0,0%,88%)] px-2 py-1 whitespace-nowrap bg-blue-50/50 dark:bg-blue-950/10">{extra.enddatum}</td>
-                          <td className="border border-[hsl(0,0%,88%)] px-2 py-1 whitespace-nowrap bg-blue-50/50 dark:bg-blue-950/10">{extra.lagerbestand}</td>
-                          <td className="border border-[hsl(0,0%,88%)] px-2 py-1 whitespace-nowrap bg-blue-50/50 dark:bg-blue-950/10" />
+                          <td className="border border-[hsl(0,0%,85%)] px-2 py-1 whitespace-nowrap bg-blue-50/50 dark:bg-blue-950/10">{extra.sonderpreis}</td>
+                          <td className="border border-[hsl(0,0%,85%)] px-2 py-1 whitespace-nowrap bg-blue-50/50 dark:bg-blue-950/10">{extra.startdatum}</td>
+                          <td className="border border-[hsl(0,0%,85%)] px-2 py-1 whitespace-nowrap bg-blue-50/50 dark:bg-blue-950/10">{extra.enddatum}</td>
+                          <td className="border border-[hsl(0,0%,85%)] px-2 py-1 whitespace-nowrap bg-blue-50/50 dark:bg-blue-950/10">{extra.lagerbestand}</td>
+                          <td className="border border-[hsl(0,0%,85%)] px-2 py-1 whitespace-nowrap bg-blue-50/50 dark:bg-blue-950/10" />
                         </tr>
                       );
                     })}

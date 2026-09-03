@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Upload, Download, Sparkles, FolderTree, Loader2, Database, Trash2 } from "lucide-react";
+import { ArrowLeft, Upload, Download, Sparkles, FolderTree, Loader2, Database, Trash2, Globe } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { type Lang, t } from "@/lib/translations";
 import { TextPreviewModal, type TextPreviewRow } from "@/components/TextPreviewModal";
@@ -783,7 +783,7 @@ const Smart = () => {
       setCategoryPreviewRows(previewRows);
       setCategoryPreviewOpen(true);
     } catch (err) {
-      toast({ title: lang === "DE" ? "Fehler" : "Error", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+      toast({ title: t("error", lang), description: err instanceof Error ? err.message : String(err), variant: "destructive" });
     } finally {
       setIsMapping(false);
     }
@@ -1163,7 +1163,10 @@ const Smart = () => {
               {lang === "DE" ? "KI-Namensgenerierung aus bestehendem JTL-Export" : "AI naming from an existing JTL export"}
             </span>
           </div>
-          <Button variant="outline" size="sm" onClick={() => setLang(lang === "DE" ? "EN" : "DE")}>{lang}</Button>
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setLang(lang === "DE" ? "EN" : "DE")}>
+            <Globe className="h-4 w-4" />
+            {lang === "DE" ? "EN" : "DE"}
+          </Button>
         </div>
 
         {/* ── Uploads ────────────────────────────────────────────────────── */}
@@ -1276,7 +1279,7 @@ const Smart = () => {
           <div className="h-5 w-px bg-border mx-1" />
           <div className="flex items-center gap-1.5">
             <Checkbox id="fillMerkmale" checked={fillMerkmale} onCheckedChange={v => handleFillMerkmaleToggle(v === true)} disabled={isClassifying || filledCount === 0} />
-            <Label htmlFor="fillMerkmale" className="text-xs">{lang === "DE" ? "Merkmale" : "Attributes"}</Label>
+            <Label htmlFor="fillMerkmale" className="text-xs">{t("merkmale", lang)}</Label>
           </div>
           <div className="flex items-center gap-1.5">
             <Checkbox id="fillMetaText" checked={fillMetaText} onCheckedChange={v => handleFillMetaTextToggle(v === true)} disabled={isGeneratingTexts || filledCount === 0} />
@@ -1302,22 +1305,22 @@ const Smart = () => {
         </div>
         <div className="border border-border rounded-lg overflow-auto max-h-[55vh]">
           <table className="text-xs border-collapse w-max min-w-full">
-            <thead className="bg-muted sticky top-0 z-10">
-              <tr>
-                <th className="border px-2 py-1 text-left font-medium w-8">#</th>
+            <thead className="sticky top-0 z-10">
+              <tr className="bg-[hsl(0,0%,85%)]">
+                <th className="border border-[hsl(0,0%,75%)] px-2 py-1 text-left font-medium w-8">#</th>
                 {gesamtPreviewRows[0] && Object.keys(gesamtPreviewRows[0]).map(col => (
-                  <th key={col} className="border px-2 py-1 text-left font-medium whitespace-nowrap" style={{ width: 150 }}>{col}</th>
+                  <th key={col} className="border border-[hsl(0,0%,75%)] px-2 py-1 text-left font-medium whitespace-nowrap" style={{ width: 150 }}>{col}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {gesamtPreviewRows.map((row, i) => (
-                <tr key={i} className={i % 2 === 0 ? "bg-background" : "bg-muted/20"}>
-                  <td className="border px-2 py-1 text-center text-muted-foreground">{i + 1}</td>
+                <tr key={i} className={i % 2 === 0 ? "bg-[hsl(0,0%,96%)]" : "bg-[hsl(0,0%,92%)]"}>
+                  <td className="border border-[hsl(0,0%,85%)] px-2 py-1 text-center text-muted-foreground bg-[hsl(0,0%,90%)]">{i + 1}</td>
                   {Object.keys(row).map(col => (
                     <td
                       key={col}
-                      className="border px-2 py-1 truncate"
+                      className="border border-[hsl(0,0%,85%)] px-2 py-1 truncate"
                       style={{ width: 150, maxWidth: 150 }}
                       title={String(row[col] ?? "")}
                     >
@@ -1328,7 +1331,7 @@ const Smart = () => {
               ))}
               {gesamtPreviewRows.length === 0 && (
                 <tr>
-                  <td colSpan={2} className="border px-4 py-8 text-center text-muted-foreground">
+                  <td colSpan={2} className="border border-[hsl(0,0%,85%)] px-4 py-8 text-center text-muted-foreground">
                     {lang === "DE" ? "Noch keine Bestellung importiert." : "No order imported yet."}
                   </td>
                 </tr>
