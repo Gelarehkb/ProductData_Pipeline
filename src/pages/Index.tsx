@@ -492,8 +492,7 @@ const Index = () => {
 
   // ── Product link search ──────────────────────────────────────────────────────
   const productLinkClientCache = useRef<Map<string, string>>(new Map()); // han.lower → url (""=no result)
-  const autoFoundLinks = useRef<Map<string, string>>(new Map()); // rowId → url that was auto-inserted
-  const autoTriggeredHANs = useRef<Set<string>>(new Set()); // han.lower values already auto-triggered
+  const autoFoundLinks = useRef<Map<string, string>>(new Map()); // rowId → url that was inserted by a search
   const [isFindingLinks, setIsFindingLinks] = useState(false);
   const [findLinkStatus, setFindLinkStatus] = useState<Record<string, "loading" | "found" | "not_found" | "error">>({});
 
@@ -1918,48 +1917,6 @@ const Index = () => {
       toast({ title: lang === "DE" ? "Kein Produktlink gefunden" : "No product links found", description: lang === "DE" ? `Für ${notFound} Artikel kein Link gefunden.` : `No link found for ${notFound} articles.`, variant: "destructive" });
     }
   };
-
-  // Auto-trigger: when a row gains a new HAN value and its Description is empty, search automatically
-  useEffect(() => {
-    rows.forEach(r => {
-      const han = (r.HAN || "").trim();
-      if (!han) return;
-      const cacheKey = han.toLowerCase();
-      if (autoTriggeredHANs.current.has(cacheKey)) return;
-      autoTriggeredHANs.current.add(cacheKey);
-      // Only auto-search if Description is empty
-      if ((r.Description || "").trim()) return;
-      const brand = hersteller.trim();
-      if (!brand) return;
-      (async () => {
-        setFindLinkStatus(prev => ({ ...prev, [r.id]: "loading" }));
-        try {
-          const cached = productLinkClientCache.current.get(cacheKey);
-          if (cached !== undefined) {
-            if (cached) { applyProductLink(r.id, cached); setFindLinkStatus(prev => ({ ...prev, [r.id]: "found" })); }
-            else { setFindLinkStatus(prev => ({ ...prev, [r.id]: "not_found" })); }
-            return;
-          }
-          const res = await fetch("/api/find-product-link", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ han, brand }),
-          });
-          const data = await res.json();
-          if (res.ok && data.url) {
-            productLinkClientCache.current.set(cacheKey, data.url);
-            applyProductLink(r.id, data.url);
-            setFindLinkStatus(prev => ({ ...prev, [r.id]: "found" }));
-          } else {
-            productLinkClientCache.current.set(cacheKey, "");
-            setFindLinkStatus(prev => ({ ...prev, [r.id]: "not_found" }));
-          }
-        } catch {
-          setFindLinkStatus(prev => ({ ...prev, [r.id]: "error" }));
-        }
-      })();
-    });
-  }, [rows]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleGenerateTexts = async () => {
     const filledRows = rows.filter(r => getClothName(r).trim() !== "");
