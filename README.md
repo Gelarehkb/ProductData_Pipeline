@@ -1,73 +1,42 @@
-# Welcome to your Lovable project
+# ProductData_Pipeline
 
-## Project info
+A web app for preparing and exporting clothing/apparel product master data for the [JTL](https://www.jtl-software.com/) e-commerce/ERP ecosystem. It provides a spreadsheet-style editor and a set of tools for building consistent article names, article numbers, and export files (Artikelstammdaten) used to list products across sales channels.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+  ## Features
 
-## How can I edit this code?
+- **Gesamtexport editor** (`/`) — a spreadsheet-like grid for entering and editing product rows (collection, item name, measurements, material, category/Warengruppe, color, size, EAN, HAN, prices, quantity, description) with paste, undo, find & replace, and CSV/dictionary import
+- **Artikel anlegen** (`/artikel-anlegen`) — guided article creation
+- **Smart naming** (`/smart`) — automatically builds standardized article names and article numbers (Artikelnummer/Artikelname) using a German naming dictionary, with duplicate detection for color/size
+- **Text generator** (`/text-generator`) — generates product description text
+- **Discounts** (`/discounts`) — manage discount/price data
+- **Sales channel export** (`/sales-channel`) — exports JTL Artikelstammdaten formatted for specific sales channels
 
-There are several ways of editing your application.
+## Tech Stack
 
-**Use Lovable**
+- React + TypeScript, built with Vite
+- shadcn-ui components on top of Tailwind CSS
+- React Router for client-side routing, TanStack Query for data fetching
+- A small Node.js backend under `server/` exposing API routes used by the app
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+## Getting Started
 
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
+```bash
+# install dependencies
 npm i
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+# copy environment variables and fill in the required values
+cp .env.example .env
+
+# start the frontend dev server
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+The `server/` directory contains the backend API; see `server/index.js` and `server/routes` for available endpoints.
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+## Project Origin
 
-**Use GitHub Codespaces**
+This project was originally scaffolded with [Lovable](https://lovable.dev/) and has since been extended with custom pages and a backend service.
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## License
 
-## What technologies are used for this project?
-
-This project is built with:
-
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+No license specified yet.
