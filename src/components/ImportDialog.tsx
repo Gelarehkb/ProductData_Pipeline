@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -60,10 +60,27 @@ function ColumnMultiSelect({
   headers, values, onChange, placeholder,
 }: { headers: string[]; values: number[]; onChange: (v: number[]) => void; placeholder: string }) {
   const [open, setOpen] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
   const toggle = (idx: number) => {
     onChange(values.includes(idx) ? values.filter(v => v !== idx) : [...values, idx]);
   };
   const displayText = values.length > 0 ? values.map(i => headers[i]).join(", ") : "";
+
+  // The popover is portalled to <body>, i.e. outside the dialog's scroll lock
+  // (react-remove-scroll), which cancels wheel events over it. Scroll the list
+  // ourselves before the lock can see the event. React's own onWheel is passive,
+  // so the listener has to be attached natively.
+  useEffect(() => {
+    const el = listRef.current;
+    if (!open || !el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      el.scrollTop += e.deltaY;
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [open]);
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -78,7 +95,11 @@ function ColumnMultiSelect({
           <ChevronDown className="h-3.5 w-3.5 opacity-50 shrink-0" />
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-56 p-2 bg-background z-50 max-h-60 overflow-y-auto" align="start">
+      <PopoverContent
+        ref={listRef}
+        className="w-56 p-2 bg-background z-50 max-h-60 overflow-y-auto overscroll-contain"
+        align="start"
+      >
         {headers.map((h, i) => (
           <label key={i} className="flex items-center gap-2 px-2 py-1.5 hover:bg-accent rounded cursor-pointer text-xs">
             <Checkbox checked={values.includes(i)} onCheckedChange={() => toggle(i)} />
