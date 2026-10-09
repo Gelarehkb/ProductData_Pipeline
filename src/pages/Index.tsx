@@ -101,6 +101,7 @@ const createEmptyRow = (): ClothRow => ({
   EK: "",
   VK: "",
   Menge: "",
+  MOQ: "",
   Description: "",
   Artikelnummer: "",
   MerkmaleGroesse: "",
@@ -1005,6 +1006,7 @@ const Index = () => {
     { key: "EK", label: t("colEK", lang), width: "80px", resizable: true },
     { key: "VK", label: t("colVK", lang), width: "80px", resizable: true },
     { key: "Menge", label: t("colMenge", lang), width: "80px", resizable: true },
+    { key: "MOQ", label: t("colMOQ", lang), width: "70px", resizable: true },
     { key: "Description", label: lang === "DE" ? "Beschreibung" : "Description", width: "200px", resizable: true },
   ];
 
@@ -1077,7 +1079,7 @@ const Index = () => {
       
       // Find first empty row or append
       const firstEmptyIndex = rows.findIndex(r => 
-        !r.Collection && !r.ItemName && !r.Measurement && !r.InfoMaterial && !r.color && !r.Size && !r.EAN && !r.HAN && !r.EK && !r.VK && !r.Menge
+        !r.Collection && !r.ItemName && !r.Measurement && !r.InfoMaterial && !r.color && !r.Size && !r.EAN && !r.HAN && !r.EK && !r.VK && !r.Menge && !r.MOQ
       );
       
       if (firstEmptyIndex >= 0) {
@@ -2370,7 +2372,8 @@ const Index = () => {
           vaterArtikelnummer, "", name, "", color, "", "Vater", applyDiscount(minEK), minVK, hersteller,
           AufAB, AufAuf, AufSe, Lieferstatus, LieferzeitVal, "", lieferant, firstRowWarengruppe, translated,
           parentGroesse, parentArt, parentFarbe, "",
-          tx.produkttext, tx.Title_Tag, tx.html_de, tx.meta_description, tx.suchbegriffe
+          tx.produkttext, tx.Title_Tag, tx.html_de, tx.meta_description, tx.suchbegriffe,
+          ""
         ));
       }
 
@@ -2406,7 +2409,8 @@ const Index = () => {
           rowArt,
           rowFarbe,
           safe(r.Description),
-          tx.produkttext, tx.Title_Tag, tx.html_de, tx.meta_description, tx.suchbegriffe
+          tx.produkttext, tx.Title_Tag, tx.html_de, tx.meta_description, tx.suchbegriffe,
+          r.MOQ || ""
         ));
       });
     });

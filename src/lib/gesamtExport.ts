@@ -16,6 +16,7 @@ export interface ClothRow {
   EK: string;
   VK: string;
   Menge: string;
+  MOQ?: string;
   Description?: string;
   Artikelnummer?: string;
   MerkmaleGroesse?: string;
@@ -151,7 +152,8 @@ export const buildRow = (
   merkmaleGroesse: string = "", merkmaleArt: string = "", merkmaleFarbe: string = "",
   description: string = "",
   produkttext: string = "", titleTag: string = "", htmlDe: string = "",
-  metaDescription: string = "", suchbegriffe: string = ""
+  metaDescription: string = "", suchbegriffe: string = "",
+  moq: string = ""
 ): Record<string, string | number> => {
   let check = "";
   try {
@@ -208,7 +210,7 @@ export const buildRow = (
     "Name Auffüllen Saison": "Auffüllen Saison",
     "Auffüllen Saison": AufSe,
     "Abnahmeintervall": 0,
-    "Mindestabnahme": 0,
+    "Mindestabnahme": moq.trim() !== "" ? moq.trim() : 0,
     "Bild 1": "",
     "Beschaffungszeit (manuell in Tage)": Lieferzeit,
     "Bild URL": description || "",
