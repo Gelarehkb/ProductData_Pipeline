@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Loader2, Download, Sparkles, Undo2, ArrowLeft, Globe } from "lucide-react";
+import { Loader2, Download, Sparkles, Undo2, ArrowLeft, Globe, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { type Lang, t } from "@/lib/translations";
 
@@ -204,6 +204,15 @@ export default function TextGenerator() {
     setRowCountInput(String(n));
     applyRowCount(n);
   };
+
+  const removeRow = useCallback((id: string) => {
+    setHistory(prev => [...prev.slice(-49), rows]);
+    setRows(prev => {
+      const next = prev.filter(r => r.id !== id);
+      setRowCountInput(String(next.length));
+      return next;
+    });
+  }, [rows]);
 
   // ---------------------------------------------------------------------------
   // Cell change with undo debounce
@@ -476,7 +485,11 @@ export default function TextGenerator() {
       } else if ((e.key === "Delete" || e.key === "Backspace") && !isTableInput) {
         if (selection.length > 0) { e.preventDefault(); handleDeleteSelection(); }
       } else if (e.key === "Escape") {
-        setSelection([]);
+        if (selection.length > 0) {
+          e.preventDefault();
+          // Excel-like: clear contents of selected cells, keep selection intact
+          handleDeleteSelection();
+        }
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -631,7 +644,7 @@ export default function TextGenerator() {
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
-  const totalWidth = COLUMNS.reduce((s, c) => s + c.width, 0) + 40;
+  const totalWidth = COLUMNS.reduce((s, c) => s + c.width, 0) + 40 + 40;
 
   return (
     <div className="min-h-screen bg-background p-6">
@@ -737,6 +750,7 @@ export default function TextGenerator() {
               <colgroup>
                 <col style={{ width: 40 }} />
                 {COLUMNS.map(c => <col key={c.key} style={{ width: c.width }} />)}
+                <col style={{ width: 40 }} />
               </colgroup>
 
               {/* Sticky header */}
@@ -771,6 +785,7 @@ export default function TextGenerator() {
                       )}
                     </th>
                   ))}
+                  <th className="border border-[hsl(0,0%,75%)] px-2 py-2 w-10 select-none" />
                 </tr>
               </thead>
 
@@ -847,13 +862,24 @@ export default function TextGenerator() {
                         </td>
                       );
                     })}
+                    <td className="border border-[hsl(0,0%,85%)] p-1 text-center">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 text-destructive hover:text-destructive"
+                        onClick={() => removeRow(row.id)}
+                        title={lang === "DE" ? "Zeile entfernen" : "Remove row"}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </td>
                   </tr>
                 ))}
 
                 {/* Add row */}
                 <tr>
                   <td
-                    colSpan={COLUMNS.length + 1}
+                    colSpan={COLUMNS.length + 2}
                     className="border border-[hsl(0,0%,85%)] px-3 py-1.5 text-center cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/30 text-xs transition-colors select-none"
                     onClick={() => {
                       setRows(prev => [...prev, createEmptyRow(defaultMode)]);
