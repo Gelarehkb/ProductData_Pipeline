@@ -2,6 +2,63 @@ import { Router } from 'express';
 
 const router = Router();
 
+// ── House naming conventions (safety net) ───────────────────────────────────
+// The prompt above asks the model to apply these, but LLMs aren't 100%
+// reliable on exact lexical substitutions — this guarantees them regardless
+// of what the model actually returned. Kept in sync by hand with
+// src/lib/gesamtExport.ts's applyNamingConventions()/applySwimwearUvPrefix()
+// (that's a TS module in the frontend bundle; this is a separate Node
+// process, so it can't be imported directly).
+const wordBoundary = (pattern) =>
+  new RegExp(`(?<![\\p{L}\\p{N}_])(?:${pattern})(?![\\p{L}\\p{N}_])`, 'giu');
+
+const NAME_FIXES = [
+  [wordBoundary('reise\\s*matra(?:t)?ze'), 'Matratze Reise'],
+  [wordBoundary('spann\\s*bettlaken'), 'Spannleintuch'],
+  [wordBoundary('spannlaken'), 'Spannleintuch'],
+  [wordBoundary('bettbezug'), 'Spannleintuch'],
+  [wordBoundary('musik\\s*box'), 'Spieluhr'],
+  [wordBoundary('sondermass(?:e)?'), 'Sondermaß'],
+  [wordBoundary('kinderkissen'), 'Kopfkissen'],
+  [wordBoundary('badebluse|bade[- ]?shirt'), 'UV Bade-Shirt'],
+  [wordBoundary('(\\d+)\\s*teil(?:ig)?'), '$1teilig'],
+  [wordBoundary('(\\d+)[\\s-]*in[\\s-]*1'), '$1in1'],
+  [wordBoundary('(\\d+)er\\s*set'), '$1Stk'],
+  [/(\d+)\s*[x×]\s*(\d+)\s*[x×]\s*(\d+)\s*cm\b/gi, '$1x$2x$3cm'],
+  [/(\d+)\s*[x×]\s*(\d+)\s*cm\b/gi, '$1x$2cm'],
+];
+const FORCE_LOWERCASE_WORDS = ['gerippt'];
+const COLOR_WORDS = [
+  'beige', 'blau', 'braun', 'gelb', 'grau', 'grün', 'gruen', 'mehrfärbig', 'mehrfaerbig',
+  'orange', 'rosa', 'rot', 'schwarz', 'türkis', 'tuerkis', 'violett', 'weiß', 'weiss',
+  'pink', 'blue', 'brown', 'yellow', 'grey', 'gray', 'green', 'multicolor', 'red', 'black',
+  'turquoise', 'purple', 'violet', 'white', 'navy', 'mint', 'khaki', 'sand', 'taupe', 'cream', 'ivory', 'rose',
+];
+
+function applyNamingConventions(raw) {
+  let s = raw;
+  for (const [re, replacement] of NAME_FIXES) s = s.replace(re, replacement);
+  for (const w of FORCE_LOWERCASE_WORDS) s = s.replace(wordBoundary(w), w.toLowerCase());
+  for (const c of COLOR_WORDS) s = s.replace(wordBoundary(c), c.toLowerCase());
+  s = s.replace(wordBoundary('aus'), ''); // filler word — drop it entirely
+  return s.replace(/\s+/g, ' ').trim();
+}
+
+function applySwimwearUvPrefix(text, warengruppe, hersteller) {
+  const hay = `${text} ${warengruppe}`.toLowerCase();
+  const isSwim = /badehose|badeanzug|badeoverall|badehut|badeschuh|badesandale/.test(hay);
+  if (!isSwim) return text;
+  const isBreeSandale = /\bbree\b/.test((hersteller || '').toLowerCase()) && /sandale/.test(hay);
+  if (isBreeSandale) return text;
+  return /^uv\b/i.test(text.trim()) ? text : `UV ${text}`.trim();
+}
+
+function needsTogNumber(text, warengruppe) {
+  const hay = `${text} ${warengruppe}`.toLowerCase();
+  if (!/bettdecke/.test(hay)) return false;
+  return !/\d+\s*tog\b/i.test(text);
+}
+
 // ── Route ──────────────────────────────────────────────────────────────────
 // Given a batch of new-order product groups, each with a handful of matched
 // examples pulled from the shop's real JTL export, ask the model to infer the
@@ -30,6 +87,23 @@ STRIKTE FORMATREGELN für artikelnummer und artikelname (gelten für JEDES Produ
 - Kein Wort und keine Zahl darf innerhalb desselben Felds mehrfach vorkommen — auch nicht in unterschiedlicher Groß-/Kleinschreibung (z.B. "Navy navy" oder "86 86" sind IMMER falsch). Baue das Feld aus den einzelnen Bestandteilen (Name, Farbe, Größe, Präfix) so zusammen, wie es die Referenzartikel zeigen, aber füge nie einen Bestandteil hinzu, der im Ergebnis schon enthalten ist.
 - Übernimm NIEMALS das Eingabeformat dieses Prompts (Anführungszeichen, das Zeichen "|", Feldbezeichner wie "Name:", "Kollektion:", "Maß:", "Farbe:", "Größe:") in artikelnummer oder artikelname — diese Strukturzeichen dienen nur dir zum Lesen der Eingabe und dürfen im Ergebnis nicht auftauchen.
 - Übernimm Groß-/Kleinschreibung, Leerzeichen und Trennzeichen exakt so, wie sie in den Referenzartikeln vorkommen — erfinde keine eigene Formatierung.
+
+ZWINGENDE NAMENSKONVENTIONEN (immer anwenden, auch wenn kein Referenzartikel das zeigt):
+- "Reisematra(t)ze" → "Matratze Reise".
+- "Spann Bettlaken", "Spannlaken", "Bettbezug" → "Spannleintuch".
+- "2 teilig" / "2teil" → "2teilig" (Zahl + "teilig" ohne Leerzeichen, jede Stückzahl).
+- Maß-Angaben in der Form "..x..x..cm", z.B. "100x50x30cm" — keine Leerzeichen um das "x", "cm" klein und direkt angehängt.
+- "Sondermass"/"Sondermasse" → "Sondermaß" (ß, nicht ss).
+- Alle Badehosen, Badeanzüge, Badeoveralls, Badehüte und Badeschuhe (inkl. Badesandalen) MÜSSEN mit "UV " beginnen — AUSSER Sandalen der Marke Bree, die bekommen KEIN "UV".
+- "Kopfkissen"/"Kinderkissen" (und Varianten davon) → immer "Kopfkissen".
+- Bettdecken MÜSSEN eine TOG-Zahl im Namen tragen (z.B. "4.5 TOG") — wenn keine TOG-Angabe in den Eingabefeldern auffindbar ist, setze confidence auf "low" statt eine TOG-Zahl zu erfinden.
+- Alle Badeshirts heißen "UV Bade-Shirt" — NIEMALS "Badebluse" oder nur "Badeshirt" ohne "UV".
+- "Musik Box" → "Spieluhr".
+- "3-in-1" / "3 in 1" → "3in1" (keine Leerzeichen/Bindestriche).
+- "2er Set" → "2Stk" (Zahl + "Stk", jede Stückzahl).
+- Farbwörter IMMER klein schreiben (z.B. "rot" statt "Rot", "red" statt "Red") — auch wenn sie mitten im Namen stehen, nicht nur als angehängte Farbe.
+- "gerippt" ist ein Adjektiv/Adverb, kein Nomen — IMMER klein geschrieben ("gerippt", nie "Gerippt"), unabhängig von der Position im Namen.
+- Das Füllwort "aus" (z.B. "Body aus Bio-Baumwolle") gehört NICHT in artikelname/artikelnummer — einfach weglassen ("Body Bio-Baumwolle").
 
 Neue Produkte (${items.length} Stück):
 ${items.map((it, i) => `${i + 1}. id="${it.id}" | Name: "${it.itemName || ''}" ${it.collection ? `| Kollektion: "${it.collection}" ` : ''}${it.measurement ? `| Maß: "${it.measurement}" ` : ''}${it.infoMaterial ? `| Info/Material: "${it.infoMaterial}" ` : ''}| Farbe: "${it.color || ''}" | Größe: "${it.size || ''}" | Warengruppe: "${it.warengruppe || ''}" | Hersteller: "${it.hersteller || ''}" | matchTier: "${it.matchTier || 'generic'}"
@@ -78,12 +152,26 @@ Antworte NUR mit JSON ohne Markdown, exakt ${items.length} Einträge in derselbe
     const byId = new Map(results.map(r => [String(r?.id || ''), r]));
     const normalized = items.map((it, i) => {
       const r = byId.get(String(it.id)) || results[i] || {};
+      const warengruppe = it.warengruppe || '';
+      const hersteller = it.hersteller || '';
+
+      // House naming conventions — guaranteed regardless of model compliance.
+      let artikelnummer = applyNamingConventions(String(r?.artikelnummer || '').trim());
+      let artikelname = applyNamingConventions(String(r?.artikelname || '').trim());
+      artikelnummer = applySwimwearUvPrefix(artikelnummer, warengruppe, hersteller);
+      artikelname = applySwimwearUvPrefix(artikelname, warengruppe, hersteller);
+
+      // Bettdecke without a TOG number can't be auto-fixed — flag it for
+      // manual review instead of silently exporting an incomplete name.
+      let confidence = r?.confidence === 'high' ? 'high' : 'low';
+      if (needsTogNumber(artikelname, warengruppe)) confidence = 'low';
+
       return {
         id: it.id,
-        artikelnummer: String(r?.artikelnummer || '').trim(),
-        artikelname: String(r?.artikelname || '').trim(),
+        artikelnummer,
+        artikelname,
         han: String(r?.han || '').trim(),
-        confidence: r?.confidence === 'high' ? 'high' : 'low',
+        confidence,
       };
     });
 

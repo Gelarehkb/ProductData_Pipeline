@@ -127,6 +127,82 @@ export const mapColorToMerkmaleFarbe = (color: string, options: string[]): strin
   return "";
 };
 
+// ---------------------------------------------------------------------------
+// House naming conventions — deterministic corrections that MUST hold for
+// every Artikelname/Artikelnummer, no matter how it was produced (typed into
+// the grid, built from the raw supplier name, or suggested by AI in Smart
+// naming). Applied as a final pass in buildRow() so every page gets it for
+// free. NOTE: server/routes/generate-naming.js runs in a separate Node
+// process and keeps its own copy of the lexical fixes below — keep both in
+// sync if this list changes.
+//
+// A plain "\b" word boundary doesn't work for German words ending in ß/umlauts
+// (JS's \w excludes them, so e.g. "weiß " never matches \bweiß\b) — this
+// builds a unicode-aware boundary with lookaround instead.
+const wordBoundary = (pattern: string): RegExp =>
+  new RegExp(`(?<![\\p{L}\\p{N}_])(?:${pattern})(?![\\p{L}\\p{N}_])`, "giu");
+
+// [pattern, replacement] — replacement may use $1/$2 capture-group refs.
+const NAME_FIXES: [RegExp, string][] = [
+  [wordBoundary("reise\\s*matra(?:t)?ze"), "Matratze Reise"],
+  [wordBoundary("spann\\s*bettlaken"), "Spannleintuch"],
+  [wordBoundary("spannlaken"), "Spannleintuch"],
+  [wordBoundary("bettbezug"), "Spannleintuch"],
+  [wordBoundary("musik\\s*box"), "Spieluhr"],
+  [wordBoundary("sondermass(?:e)?"), "Sondermaß"],
+  [wordBoundary("kinderkissen"), "Kopfkissen"],
+  [wordBoundary("badebluse|bade[- ]?shirt"), "UV Bade-Shirt"],
+  [wordBoundary("(\\d+)\\s*teil(?:ig)?"), "$1teilig"],       // "2 teilig" / "2teil" → "2teilig"
+  [wordBoundary("(\\d+)[\\s-]*in[\\s-]*1"), "$1in1"],         // "3-in-1" / "3 in 1" → "3in1"
+  [wordBoundary("(\\d+)er\\s*set"), "$1Stk"],                 // "2er Set" → "2Stk"
+  // Maß: "12 x 34 x 56 CM" / "12X34X56cm" → "12x34x56cm"
+  [/(\d+)\s*[x×]\s*(\d+)\s*[x×]\s*(\d+)\s*cm\b/gi, "$1x$2x$3cm"],
+  [/(\d+)\s*[x×]\s*(\d+)\s*cm\b/gi, "$1x$2cm"],
+];
+
+// Adjectives/particles that toProperCase would wrongly capitalize as if they
+// were nouns — German only capitalizes nouns, not adverbs like "gerippt".
+const FORCE_LOWERCASE_WORDS = ["gerippt"];
+
+// Color words (DE + common EN supplier spellings) — always lowercase in an
+// Artikelname/Artikelnummer, wherever they appear (not just the auto-appended
+// color suffix, which was already lowercased separately).
+const COLOR_WORDS = [
+  "beige", "blau", "braun", "gelb", "grau", "grün", "gruen", "mehrfärbig", "mehrfaerbig",
+  "orange", "rosa", "rot", "schwarz", "türkis", "tuerkis", "violett", "weiß", "weiss",
+  "pink", "blue", "brown", "yellow", "grey", "gray", "green", "multicolor", "red", "black",
+  "turquoise", "purple", "violet", "white", "navy", "mint", "khaki", "sand", "taupe", "cream", "ivory", "rose",
+];
+
+export const applyNamingConventions = (raw: string): string => {
+  let s = raw;
+  for (const [re, replacement] of NAME_FIXES) s = s.replace(re, replacement);
+  for (const w of FORCE_LOWERCASE_WORDS) s = s.replace(wordBoundary(w), w.toLowerCase());
+  for (const c of COLOR_WORDS) s = s.replace(wordBoundary(c), c.toLowerCase());
+  s = s.replace(wordBoundary("aus"), ""); // filler word — drop it entirely
+  return s.replace(/\s+/g, " ").trim();
+};
+
+// Badehose/Badeanzug/Badeoverall/Badehut/Badeschuhe (incl. Badesandalen) must
+// always start with "UV " — except Bree's Sandalen, which don't get it.
+export const applySwimwearUvPrefix = (text: string, warengruppe: string, hersteller: string): string => {
+  const hay = `${text} ${warengruppe}`.toLowerCase();
+  const isSwim = /badehose|badeanzug|badeoverall|badehut|badeschuh|badesandale/.test(hay);
+  if (!isSwim) return text;
+  const isBreeSandale = /\bbree\b/.test(hersteller.toLowerCase()) && /sandale/.test(hay);
+  if (isBreeSandale) return text;
+  return /^uv\b/i.test(text.trim()) ? text : `UV ${text}`.trim();
+};
+
+// Bettdecke items must carry a TOG number in the name — this can't be
+// invented, so this only flags the row (e.g. to downgrade AI confidence)
+// rather than auto-fixing it.
+export const needsTogNumber = (text: string, warengruppe: string): boolean => {
+  const hay = `${text} ${warengruppe}`.toLowerCase();
+  if (!/bettdecke/.test(hay)) return false;
+  return !/\d+\s*tog\b/i.test(text);
+};
+
 export const AUFSE_WARENGRUPPEN = ["Kleidung Basics", "Kleidung Funktion", "Kleidung Mode"];
 
 export const artikelnummerBuilder = (KRZL: string, name: string, color: string, size: string, warengruppe: string = "", seasonalCode: string = ""): string => {
@@ -171,11 +247,19 @@ export const buildRow = (
   const fmtName = (n: string) => toProperCase(n);
   const baseName = fmtName(translatedName || name);
   const alreadyHasColor = color !== "" && baseName.toLowerCase().includes(color.toLowerCase());
-  const nameWithColor = [baseName, alreadyHasColor ? "" : color.toLowerCase()].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+  let nameWithColor = [baseName, alreadyHasColor ? "" : color.toLowerCase()].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+
+  // House naming conventions — same fixes applied to both fields, since
+  // Artikelnummer is built from the same raw name/color/size as Artikelname
+  // and must stay consistent with it.
+  let finalArtikelnummer = applyNamingConventions(artikelnummer);
+  nameWithColor = applyNamingConventions(nameWithColor);
+  finalArtikelnummer = applySwimwearUvPrefix(finalArtikelnummer, warengruppe, Hersteller);
+  nameWithColor = applySwimwearUvPrefix(nameWithColor, warengruppe, Hersteller);
 
   return {
     "für Kassa aktivieren": "Y",
-    "Artikelnummer": artikelnummer,
+    "Artikelnummer": finalArtikelnummer,
     "VaterArtikel ID-Feld": vaterartikel,
     "EAN": EAN || "",
     "HAN": HAN || "",

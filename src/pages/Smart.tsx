@@ -13,7 +13,7 @@ import { AIIdentifierPreviewModal, type AIIdentifierPreviewRow } from "@/compone
 import {
   type ClothRow, getClothName, safe, toProperCase, stripForbiddenChars,
   mapColorToMerkmaleFarbe, mapSizeToMerkmaleGroesse, artikelnummerBuilder, buildRow,
-  findDuplicateValues,
+  findDuplicateValues, applyNamingConventions, applySwimwearUvPrefix,
 } from "@/lib/gesamtExport";
 import { parseJtlCatalogFile, type JtlCatalogRow } from "@/lib/jtlCatalogParser";
 import { parseTabularFile } from "@/lib/tabularFileParser";
@@ -502,6 +502,13 @@ const Smart = () => {
       const CHUNK = 10;
       for (let i = 0; i < groupEntries.length; i += CHUNK) {
         const chunk = groupEntries.slice(i, i + CHUNK);
+        // House naming conventions (Matratze Reise, Sondermaß, UV-prefix for
+        // swimwear, etc.) — the AI results already get these applied
+        // server-side, but the formula/toProperCase fallbacks below don't go
+        // through the server, so apply them here too.
+        const finalizeName = (name: string, wg: string, hersteller: string) =>
+          applySwimwearUvPrefix(applyNamingConventions(name), wg, hersteller);
+
         const pushFallback = () => {
           chunk.forEach(([key, groupRows]) => {
             const r0 = groupRows[0];
@@ -511,8 +518,8 @@ const Smart = () => {
             previewRows.push({
               id: key,
               originalName: name, color, size: r0.Size || "", warengruppe: wg, hersteller: cand.resolvedHersteller,
-              suggestedArtikelnummer: artikelnummerBuilder(kurzl, getBaseNameForNaming(r0), color, "", wg, seasonalCode),
-              suggestedArtikelname: translatedByKey[key] || toProperCase(getBaseNameForNaming(r0)),
+              suggestedArtikelnummer: finalizeName(artikelnummerBuilder(kurzl, getBaseNameForNaming(r0), color, "", wg, seasonalCode), wg, cand.resolvedHersteller),
+              suggestedArtikelname: finalizeName(translatedByKey[key] || toProperCase(getBaseNameForNaming(r0)), wg, cand.resolvedHersteller),
               suggestedHan: r0.HAN || "",
               suggestedHersteller: cand.resolvedHersteller,
               suggestedLieferant: cand.resolvedLieferant,
@@ -562,8 +569,8 @@ const Smart = () => {
             previewRows.push({
               id: key,
               originalName: name, color, size: r0.Size || "", warengruppe: wg, hersteller: cand.resolvedHersteller,
-              suggestedArtikelnummer: result?.artikelnummer || artikelnummerBuilder(kurzl, getBaseNameForNaming(r0), color, "", wg, seasonalCode),
-              suggestedArtikelname: translatedByKey[key] || result?.artikelname || toProperCase(getBaseNameForNaming(r0)),
+              suggestedArtikelnummer: finalizeName(result?.artikelnummer || artikelnummerBuilder(kurzl, getBaseNameForNaming(r0), color, "", wg, seasonalCode), wg, cand.resolvedHersteller),
+              suggestedArtikelname: finalizeName(translatedByKey[key] || result?.artikelname || toProperCase(getBaseNameForNaming(r0)), wg, cand.resolvedHersteller),
               suggestedHan: result?.han || r0.HAN || "",
               suggestedHersteller: cand.resolvedHersteller,
               suggestedLieferant: cand.resolvedLieferant,
